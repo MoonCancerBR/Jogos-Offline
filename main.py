@@ -14,6 +14,8 @@ from quebra_cabeca import QuebraCabeca
 from jogo_1024 import Jogo1024
 from dama import JogoDama
 from xadrez import JogoXadrez
+from labirinto import Labirinto
+from Sobrevivencia.main import SobrevivenciaGame
 
 class MiniGamesApp:
     def __init__(self, root):
@@ -87,7 +89,9 @@ class MiniGamesApp:
             ("Quebra\nCabeça", self.abrir_quebra_cabeca, "#F97316", "#EA580C"),
             ("1024\nNeon", self.abrir_1024, "#B500FF", "#8A2BE2"),
             ("Dama\n1x1", self.abrir_dama, "#E11D48", "#BE123C"),
-            ("Xadrez", self.abrir_xadrez, "#64748B", "#475569")
+            ("Xadrez", self.abrir_xadrez, "#64748B", "#475569"),
+            ("Labirinto", self.abrir_labirinto, "#14B8A6", "#0F766E"),
+            ("Sobrevi-\nvencia", self.abrir_sobrevivencia, "#0EA5E9", "#0284C7")
         ]
 
         btn_style = {
@@ -355,6 +359,32 @@ class MiniGamesApp:
             self.root.deiconify()
 
         jogo_window.protocol("WM_DELETE_WINDOW", on_close)
+
+    def abrir_labirinto(self):
+        self.root.withdraw()
+
+        jogo_window = tk.Toplevel(self.root)
+
+        def on_return():
+            self.root.deiconify()
+
+        app = Labirinto(jogo_window, on_menu_return=on_return)
+
+        def on_close():
+            app.cancel_loop()
+            jogo_window.destroy()
+            self.root.deiconify()
+
+        jogo_window.protocol("WM_DELETE_WINDOW", on_close)
+
+    def abrir_sobrevivencia(self):
+        self.root.withdraw()
+        jogo = SobrevivenciaGame()
+        result = jogo.run()
+        if result == "quit":
+            self.root.destroy()
+        else:
+            self.root.deiconify()
 
 if __name__ == "__main__":
     root = tk.Tk()
