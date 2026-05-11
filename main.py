@@ -12,6 +12,8 @@ from space_invaders import SpaceInvaders
 from candy_crush import CandyCrush
 from quebra_cabeca import QuebraCabeca
 from jogo_1024 import Jogo1024
+from dama import JogoDama
+from xadrez import JogoXadrez
 
 class MiniGamesApp:
     def __init__(self, root):
@@ -83,7 +85,9 @@ class MiniGamesApp:
             ("Space\nInvaders", self.abrir_space_invaders, "#A855F7", "#7E22CE"),
             ("Candy\nCrush", self.abrir_candy_crush, "#F472B6", "#DB2777"),
             ("Quebra\nCabeça", self.abrir_quebra_cabeca, "#F97316", "#EA580C"),
-            ("1024\nNeon", self.abrir_1024, "#B500FF", "#8A2BE2")
+            ("1024\nNeon", self.abrir_1024, "#B500FF", "#8A2BE2"),
+            ("Dama\n1x1", self.abrir_dama, "#E11D48", "#BE123C"),
+            ("Xadrez", self.abrir_xadrez, "#64748B", "#475569")
         ]
 
         btn_style = {
@@ -314,6 +318,39 @@ class MiniGamesApp:
         app = Jogo1024(jogo_window, on_menu_return=on_return)
 
         def on_close():
+            jogo_window.destroy()
+            self.root.deiconify()
+
+        jogo_window.protocol("WM_DELETE_WINDOW", on_close)
+
+    def abrir_dama(self):
+        self.root.withdraw()
+
+        jogo_window = tk.Toplevel(self.root)
+
+        def on_return():
+            self.root.deiconify()
+
+        app = JogoDama(jogo_window, on_menu_return=on_return)
+
+        def on_close():
+            jogo_window.destroy()
+            self.root.deiconify()
+
+        jogo_window.protocol("WM_DELETE_WINDOW", on_close)
+
+    def abrir_xadrez(self):
+        self.root.withdraw()
+
+        jogo_window = tk.Toplevel(self.root)
+
+        def on_return():
+            self.root.deiconify()
+
+        app = JogoXadrez(jogo_window, on_menu_return=on_return)
+
+        def on_close():
+            app.cancel_timers() if hasattr(app, 'cancel_timers') else None
             jogo_window.destroy()
             self.root.deiconify()
 
