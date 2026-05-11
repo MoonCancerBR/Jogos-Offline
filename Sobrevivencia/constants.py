@@ -24,6 +24,11 @@ PROJECTILE_DAMAGE = 16
 PROJECTILE_COOLDOWN = 0.17
 PROJECTILE_LIFE = 1.65
 MAX_PROJECTILES = 130
+PROJECTILE_PARALLEL_SPACING = 11
+RICOCHET_RANGE = 360
+RICOCHET_DAMAGE_MULTIPLIER = 0.76
+POISON_DURATION = 3.4
+POISON_BASE_DPS = 6.0
 
 SWORD_DAMAGE = 46
 SWORD_RADIUS = 92
@@ -72,6 +77,7 @@ COLORS = {
     "player_core": "#38BDF8",
     "projectile": "#67E8F9",
     "projectile_freeze": "#BAE6FD",
+    "poison": "#86EFAC",
     "sword": "#FDE68A",
     "shield": "#60A5FA",
     "danger": "#FB7185",
@@ -165,6 +171,25 @@ UPGRADES = {
     "special_gain": {
         "title": "Nucleo Instavel",
         "description": "+16% carga de especial por abate.",
+    },
+    "vampirism": {
+        "title": "Vampirismo",
+        "description": "Recupera vida sempre que derrota inimigos.",
+    },
+}
+
+MAJOR_UPGRADES = {
+    "ricochet": {
+        "title": "Balas Ricocheteantes",
+        "description": "Projeteis saltam para outro inimigo proximo.",
+    },
+    "poison": {
+        "title": "Municao Venenosa",
+        "description": "Balas envenenam e causam dano por segundo.",
+    },
+    "multishot": {
+        "title": "Rajada Paralela",
+        "description": "Adiciona 2 balas paralelas por disparo.",
     },
 }
 

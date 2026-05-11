@@ -27,6 +27,7 @@ class GameLogic:
         self.drops = []
         self.floaters = []
         self.upgrade_choices = []
+        self.upgrade_is_major = False
         self.level_up_pending = False
         self.game_over = False
         self.time_alive = 0.0
@@ -151,14 +152,24 @@ class GameLogic:
         if player.mode == "projectile":
             cooldown = PROJECTILE_COOLDOWN / player.attack_rate_multiplier()
             if player.shoot_timer <= 0 and len(self.projectiles) < MAX_PROJECTILES:
-                self.projectiles.append(
-                    Projectile(
-                        pos=Vector2(player.pos) + direction * (player.radius + 8),
-                        vel=direction * PROJECTILE_SPEED,
-                        damage=player.projectile_damage(),
-                        freeze=player.buffs.get("freeze", 0) > 0,
+                count = player.projectile_count()
+                side = direction.rotate(90)
+                start_offset = -(count - 1) * 0.5
+                for index in range(count):
+                    if len(self.projectiles) >= MAX_PROJECTILES:
+                        break
+                    offset = side * ((start_offset + index) * PROJECTILE_PARALLEL_SPACING)
+                    self.projectiles.append(
+                        Projectile(
+                            pos=Vector2(player.pos) + direction * (player.radius + 8) + offset,
+                            vel=direction * PROJECTILE_SPEED,
+                            damage=player.projectile_damage(),
+                            freeze=player.buffs.get("freeze", 0) > 0,
+                            poison=player.poison_level > 0,
+                            poison_dps=POISON_BASE_DPS * player.poison_level * player.damage_multiplier(),
+                            bounces_left=player.ricochet_bounces,
+                        )
                     )
-                )
                 player.shoot_timer = cooldown
         else:
             cooldown = SWORD_COOLDOWN / player.attack_rate_multiplier()
@@ -243,10 +254,18 @@ class GameLogic:
                 continue
 
             for enemy in list(self.enemies):
+                if enemy.id in projectile.hit_ids:
+                    continue
                 if projectile.pos.distance_squared_to(enemy.pos) <= (projectile.radius + enemy.radius) ** 2:
+                    projectile.hit_ids.add(enemy.id)
                     if projectile.freeze:
                         enemy.frozen_timer = max(enemy.frozen_timer, FREEZE_DURATION)
+                    if projectile.poison:
+                        enemy.poison_timer = max(enemy.poison_timer, POISON_DURATION)
+                        enemy.poison_dps = max(enemy.poison_dps, projectile.poison_dps)
                     self.damage_enemy(enemy, projectile.damage, source="projectile")
+                    if self._try_ricochet(projectile):
+                        alive.append(projectile)
                     hit = True
                     break
 
@@ -254,6 +273,35 @@ class GameLogic:
                 alive.append(projectile)
 
         self.projectiles = alive
+
+    def _try_ricochet(self, projectile):
+        if projectile.bounces_left <= 0:
+            return False
+
+        target = None
+        target_distance = RICOCHET_RANGE * RICOCHET_RANGE
+        for enemy in self.enemies:
+            if enemy.id in projectile.hit_ids:
+                continue
+            distance_sq = projectile.pos.distance_squared_to(enemy.pos)
+            if distance_sq < target_distance:
+                target = enemy
+                target_distance = distance_sq
+
+        if target is None:
+            return False
+
+        direction = target.pos - projectile.pos
+        if direction.length_squared() <= 0:
+            return False
+
+        direction = direction.normalize()
+        projectile.vel = direction * PROJECTILE_SPEED
+        projectile.pos += direction * (projectile.radius + 8)
+        projectile.damage *= RICOCHET_DAMAGE_MULTIPLIER
+        projectile.bounces_left -= 1
+        projectile.life = max(projectile.life, 0.28)
+        return True
 
     def _update_world_timers(self, dt):
         for chunk in self.world.chunks.values():
@@ -302,6 +350,11 @@ class GameLogic:
         for enemy in list(self.enemies):
             enemy.frozen_timer = max(0, enemy.frozen_timer - dt)
             enemy.hit_flash = max(0, enemy.hit_flash - dt)
+            if enemy.poison_timer > 0:
+                enemy.poison_timer = max(0, enemy.poison_timer - dt)
+                self.damage_enemy(enemy, enemy.poison_dps * dt, source="poison")
+                if enemy.health <= 0:
+                    continue
 
             to_player = player.pos - enemy.pos
             if to_player.length_squared() > 0:
@@ -310,12 +363,13 @@ class GameLogic:
                 direction = Vector2(1, 0)
 
             slow = 0.28 if enemy.frozen_timer > 0 else 1.0
-            velocity = direction * enemy.speed * slow
+            chase_speed = enemy.speed * slow
+            velocity = direction * chase_speed
             if enemy.knockback.length_squared() > 1:
                 velocity += enemy.knockback
                 enemy.knockback *= max(0, 1.0 - 7.0 * dt)
 
-            enemy.pos = self.world.move_circle(enemy.pos, enemy.radius, velocity * dt, include_destructibles=False)
+            enemy.pos = self._move_enemy(enemy, direction, chase_speed, velocity, dt)
 
             distance_sq = enemy.pos.distance_squared_to(player.pos)
             contact_radius = enemy.radius + player.radius
@@ -332,12 +386,47 @@ class GameLogic:
                 alive.append(enemy)
         self.enemies = alive
 
+    def _move_enemy(self, enemy, direction, chase_speed, velocity, dt):
+        old_pos = Vector2(enemy.pos)
+        intended = velocity * dt
+        candidate = self.world.move_circle(old_pos, enemy.radius, intended, include_destructibles=False)
+        if intended.length_squared() <= 1:
+            return candidate
+
+        moved_sq = candidate.distance_squared_to(old_pos)
+        blocked = moved_sq < intended.length_squared() * 0.08
+        if not blocked:
+            return candidate
+
+        best_pos = candidate
+        best_score = -999999.0
+        for angle in (90, -90, 45, -45, 135, -135):
+            detour = direction.rotate(angle)
+            test_pos = self.world.move_circle(
+                old_pos,
+                enemy.radius,
+                detour * chase_speed * dt,
+                include_destructibles=False,
+            )
+            progress = old_pos.distance_to(self.player.pos) - test_pos.distance_to(self.player.pos)
+            movement = test_pos.distance_squared_to(old_pos)
+            score = progress * 12 + movement
+            if score > best_score:
+                best_score = score
+                best_pos = test_pos
+        return best_pos
+
     def _repel_enemies(self, dt):
         for enemy in self.enemies:
             distance = enemy.pos.distance_to(self.player.pos)
             if 0 < distance < 130:
                 direction = (enemy.pos - self.player.pos).normalize()
-                enemy.pos += direction * 280 * dt
+                enemy.pos = self.world.move_circle(
+                    enemy.pos,
+                    enemy.radius,
+                    direction * 280 * dt,
+                    include_destructibles=False,
+                )
                 enemy.knockback += direction * 180 * dt
 
     def _update_drops(self, dt):
@@ -389,6 +478,11 @@ class GameLogic:
         self.player.kills += 1
         self.player.score += int(enemy.xp_value * 10 + self.time_alive)
         self.player.add_special(enemy.special_value)
+        if self.player.vampirism > 0 and self.player.health < self.player.max_health:
+            heal = min(self.player.vampirism, self.player.max_health - self.player.health)
+            self.player.health += heal
+            if heal > 0:
+                self.add_floater(self.player.pos, f"+{heal:.0f}", COLORS["health"])
         self.spawn_drop("xp", enemy.pos, enemy.xp_value)
         if self.random.random() < enemy.coin_chance:
             self.spawn_drop("coin", enemy.pos + self.random_offset(18), 1)
@@ -440,8 +534,9 @@ class GameLogic:
             player.level += 1
             player.xp_to_next = int(player.xp_to_next * 1.26 + 22)
             self.level_up_pending = True
-            self.upgrade_choices = self.generate_upgrade_choices()
-            self.message = "Escolha um upgrade."
+            self.upgrade_is_major = player.level % 5 == 0
+            self.upgrade_choices = self.generate_upgrade_choices(self.upgrade_is_major)
+            self.message = "Escolha uma melhoria grande." if self.upgrade_is_major else "Escolha um upgrade."
             break
 
     def activate_random_coin_buff(self):
@@ -454,8 +549,8 @@ class GameLogic:
         }
         self.message = labels[buff]
 
-    def generate_upgrade_choices(self):
-        keys = list(UPGRADES.keys())
+    def generate_upgrade_choices(self, major=False):
+        keys = list(MAJOR_UPGRADES.keys() if major else UPGRADES.keys())
         return self.random.sample(keys, 3)
 
     def apply_upgrade(self, upgrade_key):
@@ -473,10 +568,20 @@ class GameLogic:
             player.sword_range_bonus += 0.10
         elif upgrade_key == "special_gain":
             player.special_gain_bonus += 0.16
+        elif upgrade_key == "vampirism":
+            player.vampirism += 2.5
+        elif upgrade_key == "ricochet":
+            player.ricochet_bounces += 1
+        elif upgrade_key == "poison":
+            player.poison_level += 1
+        elif upgrade_key == "multishot":
+            player.projectile_count_bonus += 2
 
         self.level_up_pending = False
+        self.upgrade_is_major = False
         self.upgrade_choices = []
-        self.message = f"Upgrade aplicado: {UPGRADES[upgrade_key]['title']}"
+        data = UPGRADES.get(upgrade_key) or MAJOR_UPGRADES[upgrade_key]
+        self.message = f"Upgrade aplicado: {data['title']}"
 
     def spawn_drop(self, kind, pos, value=1):
         radius = 8

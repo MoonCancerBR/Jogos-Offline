@@ -101,6 +101,10 @@ class Player:
     attack_rate_bonus: float = 0
     sword_range_bonus: float = 0
     special_gain_bonus: float = 0
+    vampirism: float = 0
+    ricochet_bounces: int = 0
+    poison_level: int = 0
+    projectile_count_bonus: int = 0
 
     def damage_multiplier(self):
         multiplier = 1.0 + self.damage_bonus
@@ -121,6 +125,9 @@ class Player:
 
     def projectile_damage(self):
         return PROJECTILE_DAMAGE * self.damage_multiplier()
+
+    def projectile_count(self):
+        return 1 + self.projectile_count_bonus
 
     def sword_damage(self):
         return SWORD_DAMAGE * self.damage_multiplier()
@@ -154,6 +161,8 @@ class Enemy:
     special_value: float
     coin_chance: float
     frozen_timer: float = 0
+    poison_timer: float = 0
+    poison_dps: float = 0
     hit_flash: float = 0
     knockback: Vector2 = field(default_factory=lambda: Vector2(0, 0))
 
@@ -166,6 +175,10 @@ class Projectile:
     radius: float = PROJECTILE_RADIUS
     life: float = PROJECTILE_LIFE
     freeze: bool = False
+    poison: bool = False
+    poison_dps: float = 0
+    bounces_left: int = 0
+    hit_ids: set = field(default_factory=set)
 
 
 @dataclass

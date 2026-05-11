@@ -36,17 +36,29 @@ class World:
     def chunk_coords(self, x, y):
         return math.floor(x / CHUNK_SIZE), math.floor(y / CHUNK_SIZE)
 
-    def ensure_chunk(self, cx, cy):
+    def ensure_chunk(self, cx, cy, safe_center=None, safe_radius=0):
         key = (cx, cy)
         if key not in self.chunks:
             self.chunks[key] = self._generate_chunk(cx, cy)
+            if safe_center is not None and safe_radius > 0:
+                self._clear_chunk_safe_area(self.chunks[key], safe_center, safe_radius)
         return self.chunks[key]
 
     def ensure_area(self, center, radius=2):
         cx, cy = self.chunk_coords(center.x, center.y)
         for oy in range(-radius, radius + 1):
             for ox in range(-radius, radius + 1):
-                self.ensure_chunk(cx + ox, cy + oy)
+                self.ensure_chunk(cx + ox, cy + oy, safe_center=center, safe_radius=220)
+
+    def _clear_chunk_safe_area(self, chunk, center, radius):
+        chunk["obstacles"] = [
+            rect for rect in chunk["obstacles"]
+            if not circle_rect_overlap(center.x, center.y, radius, rect)
+        ]
+        chunk["destructibles"] = [
+            item for item in chunk["destructibles"]
+            if not circle_rect_overlap(center.x, center.y, radius, item.rect)
+        ]
 
     def _generate_chunk(self, cx, cy):
         rng = random.Random(stable_hash(cx, cy, 91))
@@ -188,27 +200,50 @@ class World:
 
     def move_circle(self, pos, radius, delta, include_destructibles=True):
         new_pos = Vector2(pos)
-        if delta.x:
-            new_pos.x += delta.x
-            for rect in self.nearby_solid_rects(new_pos.x, new_pos.y, radius, include_destructibles):
-                if not circle_rect_overlap(new_pos.x, new_pos.y, radius, rect):
-                    continue
-                if delta.x > 0:
-                    new_pos.x = rect.left - radius
-                else:
-                    new_pos.x = rect.right + radius
+        if delta.length_squared() <= 0:
+            return self._resolve_circle_collisions(new_pos, radius, include_destructibles)
 
-        if delta.y:
-            new_pos.y += delta.y
-            for rect in self.nearby_solid_rects(new_pos.x, new_pos.y, radius, include_destructibles):
-                if not circle_rect_overlap(new_pos.x, new_pos.y, radius, rect):
-                    continue
-                if delta.y > 0:
-                    new_pos.y = rect.top - radius
-                else:
-                    new_pos.y = rect.bottom + radius
-
+        max_step = max(6.0, radius * 0.45)
+        steps = max(1, math.ceil(delta.length() / max_step))
+        step = delta / steps
+        for _ in range(steps):
+            new_pos += step
+            new_pos = self._resolve_circle_collisions(new_pos, radius, include_destructibles)
         return new_pos
+
+    def _resolve_circle_collisions(self, pos, radius, include_destructibles=True):
+        resolved = Vector2(pos)
+        for _ in range(4):
+            adjusted = False
+            for rect in self.nearby_solid_rects(resolved.x, resolved.y, radius, include_destructibles):
+                correction = self._circle_rect_correction(resolved, radius, rect)
+                if correction.length_squared() <= 0:
+                    continue
+                resolved += correction
+                adjusted = True
+            if not adjusted:
+                break
+        return resolved
+
+    def _circle_rect_correction(self, pos, radius, rect):
+        closest_x = max(rect.left, min(pos.x, rect.right))
+        closest_y = max(rect.top, min(pos.y, rect.bottom))
+        offset = Vector2(pos.x - closest_x, pos.y - closest_y)
+        distance_sq = offset.length_squared()
+
+        if distance_sq >= radius * radius:
+            return Vector2(0, 0)
+        if distance_sq > 0.0001:
+            distance = math.sqrt(distance_sq)
+            return offset * ((radius - distance + 0.05) / distance)
+
+        distances = [
+            (abs(pos.x - rect.left), Vector2(rect.left - radius - 0.05 - pos.x, 0)),
+            (abs(rect.right - pos.x), Vector2(rect.right + radius + 0.05 - pos.x, 0)),
+            (abs(pos.y - rect.top), Vector2(0, rect.top - radius - 0.05 - pos.y)),
+            (abs(rect.bottom - pos.y), Vector2(0, rect.bottom + radius + 0.05 - pos.y)),
+        ]
+        return min(distances, key=lambda entry: entry[0])[1]
 
     def circle_hits_wall(self, pos, radius):
         return any(circle_rect_overlap(pos.x, pos.y, radius, rect) for rect in self.nearby_solid_rects(pos.x, pos.y, radius))

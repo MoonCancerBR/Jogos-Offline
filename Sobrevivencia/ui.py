@@ -29,7 +29,7 @@ class UI:
     def world_to_screen(self, pos, camera):
         return int(pos.x - camera.x), int(pos.y - camera.y)
 
-    def render_game(self, game, mouse_pos):
+    def render_game(self, game, mouse_pos, flip=True):
         camera = Vector2(game.camera)
         if game.screen_shake > 0:
             shake = math.sin(game.time_alive * 72) * game.screen_shake
@@ -47,7 +47,8 @@ class UI:
         self._draw_special_blast(game, camera)
         self._draw_floaters(game, camera)
         self._draw_hud(game)
-        pygame.display.flip()
+        if flip:
+            pygame.display.flip()
 
     def _draw_terrain(self, game, camera):
         tile = WORLD_TILE_SIZE
@@ -105,7 +106,12 @@ class UI:
     def _draw_projectiles(self, game, camera):
         for projectile in game.projectiles:
             x, y = self.world_to_screen(projectile.pos, camera)
-            color = COLORS["projectile_freeze"] if projectile.freeze else COLORS["projectile"]
+            if projectile.freeze:
+                color = COLORS["projectile_freeze"]
+            elif projectile.poison:
+                color = COLORS["poison"]
+            else:
+                color = COLORS["projectile"]
             pygame.draw.circle(self.screen, hex_color(color), (x, y), int(projectile.radius + 2))
             pygame.draw.circle(self.screen, (8, 47, 73), (x, y), int(projectile.radius), 1)
 
@@ -116,6 +122,8 @@ class UI:
             if enemy.frozen_timer > 0:
                 color = (125, 211, 252)
             pygame.draw.circle(self.screen, color, (x, y), int(enemy.radius))
+            if enemy.poison_timer > 0:
+                pygame.draw.circle(self.screen, hex_color(COLORS["poison"]), (x, y), int(enemy.radius + 4), 2)
             pygame.draw.circle(self.screen, (25, 25, 35), (x, y), int(enemy.radius), 2)
             if enemy.kind == "brute":
                 pygame.draw.circle(self.screen, (254, 226, 226), (x - 7, y - 5), 3)
@@ -211,6 +219,7 @@ class UI:
         self.screen.blit(self.font_tiny.render(game.message, True, hex_color(COLORS["muted"])), (560, 44))
 
         self._draw_buff_list(player)
+        self._draw_stats_panel(game)
 
     def _draw_buff_list(self, player):
         labels = {
@@ -228,6 +237,41 @@ class UI:
             width = max(82, self.font_tiny.size(text)[0] + 18)
             x -= width + 8
             self._pill(x, y, width, 22, text, COLORS["upgrade"])
+
+    def _draw_stats_panel(self, game):
+        player = game.player
+        terrain_key = game.world.terrain_at(player.pos.x, player.pos.y)
+        terrain = TERRAIN_TYPES[terrain_key]
+        max_speed = player.base_speed * player.speed_multiplier()
+        terrain_speed = max_speed * terrain["speed"]
+        fire_rate = player.attack_rate_multiplier() / PROJECTILE_COOLDOWN
+        x = SCREEN_WIDTH - 224
+        y = 94
+        w = 200
+        h = 174
+        pygame.draw.rect(self.screen, hex_color(COLORS["panel"]), (x, y, w, h), border_radius=6)
+        pygame.draw.rect(self.screen, (51, 65, 85), (x, y, w, h), width=1, border_radius=6)
+        self.screen.blit(self.font_small.render("Status do boneco", True, hex_color(COLORS["text"])), (x + 14, y + 10))
+
+        stats = [
+            ("Vel max", f"{max_speed:.0f}"),
+            (f"Terreno {terrain['name']}", f"{terrain_speed:.0f}"),
+            ("Dano tiro", f"{player.projectile_damage():.0f}"),
+            ("Dano espada", f"{player.sword_damage():.0f}"),
+            ("Alcance espada", f"{player.sword_radius():.0f}"),
+            ("Ritmo tiro", f"{fire_rate:.1f}/s"),
+            ("Balas/salva", str(player.projectile_count())),
+        ]
+
+        line_y = y + 38
+        for label, value in stats:
+            self.screen.blit(self.font_tiny.render(label, True, hex_color(COLORS["muted"])), (x + 14, line_y))
+            value_surf = self.font_tiny.render(value, True, hex_color(COLORS["text"]))
+            self.screen.blit(value_surf, (x + w - 14 - value_surf.get_width(), line_y))
+            line_y += 17
+
+        passive = f"Ric {player.ricochet_bounces}  Ven {player.poison_level}  Vamp {player.vampirism:.0f}"
+        self.screen.blit(self.font_tiny.render(passive, True, hex_color(COLORS["poison"])), (x + 14, y + h - 24))
 
     def _bar(self, x, y, w, h, fill, color, bg, label):
         fill = max(0, min(1, fill))
@@ -262,11 +306,11 @@ class UI:
         return buttons
 
     def render_pause(self, game, options, selected, mouse_pos):
-        self.render_game(game, mouse_pos)
+        self.render_game(game, mouse_pos, flip=False)
         return self._overlay_menu("PAUSADO", options, selected, mouse_pos)
 
     def render_game_over(self, game, mouse_pos):
-        self.render_game(game, mouse_pos)
+        self.render_game(game, mouse_pos, flip=False)
         title = "FIM DA SOBREVIVENCIA"
         options = [("Reiniciar", "restart"), ("Voltar ao Menu", "menu"), ("Fechar", "quit")]
         return self._overlay_menu(title, options, 0, mouse_pos, extra=f"Tempo {int(game.time_alive)}s  |  Abates {game.player.kills}  |  Pontos {game.player.score}")
@@ -281,7 +325,8 @@ class UI:
             "Q ou Shift: alternar entre projetil e espada",
             "Espaco: dash com recarga e invulnerabilidade curta",
             "E: especial quando a barra azul estiver cheia",
-            "Colete XP para subir de nivel; moedas ativam buffs temporarios.",
+            "Colete XP para subir de nivel; a cada 5 niveis vem melhoria grande.",
+            "Moedas ativam buffs temporarios; escudos repelem inimigos.",
         ]
         y = 190
         for line in lines:
@@ -292,16 +337,18 @@ class UI:
         return buttons
 
     def render_upgrade(self, game, selected, mouse_pos):
-        self.render_game(game, mouse_pos)
+        self.render_game(game, mouse_pos, flip=False)
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((5, 10, 18, 205))
         self.screen.blit(overlay, (0, 0))
-        self._center_text("NOVO NIVEL", self.font_big, 116, COLORS["text"])
-        self._center_text("Escolha um upgrade permanente", self.font, 166, COLORS["muted"])
+        title = "MELHORIA GRANDE" if game.upgrade_is_major else "NOVO NIVEL"
+        subtitle = "Escolha um poder permanente raro" if game.upgrade_is_major else "Escolha um upgrade permanente"
+        self._center_text(title, self.font_big, 116, COLORS["text"])
+        self._center_text(subtitle, self.font, 166, COLORS["muted"])
         buttons = []
         y = 244
         for index, key in enumerate(game.upgrade_choices):
-            data = UPGRADES[key]
+            data = UPGRADES.get(key) or MAJOR_UPGRADES[key]
             rect = pygame.Rect(260, y, 580, 78)
             hover = rect.collidepoint(mouse_pos) or index == selected
             color = hex_color(COLORS["upgrade"] if hover else COLORS["panel_2"])
