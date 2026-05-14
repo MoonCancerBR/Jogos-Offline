@@ -4,11 +4,11 @@ import random
 from pygame.math import Vector2
 
 if __package__:
-    from .constants import CHUNK_SIZE, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
-    from .entities import Destructible, RectBody
+    from .constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
+    from .entities import Destructible, Hazard, RectBody
 else:
-    from constants import CHUNK_SIZE, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
-    from entities import Destructible, RectBody
+    from constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
+    from entities import Destructible, Hazard, RectBody
 
 
 def stable_hash(x, y, salt=0):
@@ -59,6 +59,10 @@ class World:
             item for item in chunk["destructibles"]
             if not circle_rect_overlap(center.x, center.y, radius, item.rect)
         ]
+        chunk["hazards"] = [
+            hazard for hazard in chunk["hazards"]
+            if not circle_rect_overlap(center.x, center.y, radius, hazard.rect)
+        ]
 
     def _generate_chunk(self, cx, cy):
         rng = random.Random(stable_hash(cx, cy, 91))
@@ -66,6 +70,7 @@ class World:
         base_y = cy * CHUNK_SIZE
         obstacles = []
         destructibles = []
+        hazards = []
 
         obstacle_count = 3 + rng.randint(0, 4)
         for index in range(obstacle_count):
@@ -97,8 +102,14 @@ class World:
                 continue
             if any(rect.intersects(obstacle, padding=20) for obstacle in obstacles):
                 continue
-            kind = "cache" if rng.random() < 0.22 else "crate"
-            hp = 35 if kind == "cache" else 24
+            roll = rng.random()
+            if roll < 0.10:
+                kind = "special"
+            elif roll < 0.28:
+                kind = "cache"
+            else:
+                kind = "crate"
+            hp = 44 if kind == "special" else 35 if kind == "cache" else 24
             destructibles.append(
                 Destructible(
                     id=f"{cx}:{cy}:{index}",
@@ -110,7 +121,38 @@ class World:
                 )
             )
 
-        return {"obstacles": obstacles, "destructibles": destructibles}
+        hazard_count = 2 + rng.randint(0, 3)
+        for index in range(hazard_count):
+            roll = rng.random()
+            if roll < 0.34:
+                kind = "mine"
+                width = height = rng.randint(28, 36)
+            elif roll < 0.66:
+                kind = "fire"
+                width = rng.randint(92, 148)
+                height = rng.randint(72, 118)
+            else:
+                kind = "ice"
+                width = rng.randint(116, 178)
+                height = rng.randint(82, 138)
+
+            rect = RectBody(
+                base_x + rng.randint(40, CHUNK_SIZE - width - 40),
+                base_y + rng.randint(40, CHUNK_SIZE - height - 40),
+                width,
+                height,
+            )
+            if rect.center.length() < 300:
+                continue
+            if any(rect.intersects(obstacle, padding=18) for obstacle in obstacles):
+                continue
+            if any(rect.intersects(item.rect, padding=14) for item in destructibles):
+                continue
+            if any(rect.intersects(hazard.rect, padding=24) for hazard in hazards):
+                continue
+            hazards.append(Hazard(id=f"{cx}:{cy}:h{index}", rect=rect, kind=kind, chunk=(cx, cy)))
+
+        return {"obstacles": obstacles, "destructibles": destructibles, "hazards": hazards}
 
     def terrain_at(self, x, y):
         tile_x = math.floor(x / WORLD_TILE_SIZE)
@@ -130,7 +172,14 @@ class World:
         return "grass"
 
     def speed_multiplier_at(self, x, y):
-        return TERRAIN_TYPES[self.terrain_at(x, y)]["speed"]
+        return TERRAIN_TYPES[self.terrain_at(x, y)]["speed"] * self.hazard_speed_multiplier_at(x, y)
+
+    def hazard_speed_multiplier_at(self, x, y):
+        multiplier = 1.0
+        for hazard in self.nearby_hazards(x, y, 8):
+            if hazard.kind == "ice" and circle_rect_overlap(x, y, 6, hazard.rect):
+                multiplier = max(multiplier, ICE_SPEED_MULTIPLIER)
+        return multiplier
 
     def iter_visible_terrain(self, camera_x, camera_y, width, height):
         start_x = math.floor((camera_x - VIEW_PADDING) / WORLD_TILE_SIZE)
@@ -173,6 +222,17 @@ class World:
                 if not (rect.right < left or rect.left > right or rect.bottom < top or rect.top > bottom):
                     yield item
 
+    def iter_visible_hazards(self, camera_x, camera_y, width, height):
+        left = camera_x - VIEW_PADDING
+        top = camera_y - VIEW_PADDING
+        right = camera_x + width + VIEW_PADDING
+        bottom = camera_y + height + VIEW_PADDING
+        for chunk in self._chunks_in_rect(left, top, right, bottom):
+            for hazard in chunk["hazards"]:
+                rect = hazard.rect
+                if not (rect.right < left or rect.left > right or rect.bottom < top or rect.top > bottom):
+                    yield hazard
+
     def nearby_solid_rects(self, x, y, radius, include_destructibles=True):
         left = x - radius - 96
         top = y - radius - 96
@@ -197,6 +257,19 @@ class World:
                 if not (rect.right < left or rect.left > right or rect.bottom < top or rect.top > bottom):
                     items.append(item)
         return items
+
+    def nearby_hazards(self, x, y, radius):
+        left = x - radius
+        top = y - radius
+        right = x + radius
+        bottom = y + radius
+        hazards = []
+        for chunk in self._chunks_in_rect(left, top, right, bottom):
+            for hazard in chunk["hazards"]:
+                rect = hazard.rect
+                if not (rect.right < left or rect.left > right or rect.bottom < top or rect.top > bottom):
+                    hazards.append(hazard)
+        return hazards
 
     def move_circle(self, pos, radius, delta, include_destructibles=True):
         new_pos = Vector2(pos)
@@ -251,4 +324,8 @@ class World:
     def remove_destructible(self, item):
         chunk = self.ensure_chunk(*item.chunk)
         chunk["destructibles"] = [entry for entry in chunk["destructibles"] if entry.id != item.id]
+
+    def remove_hazard(self, hazard):
+        chunk = self.ensure_chunk(*hazard.chunk)
+        chunk["hazards"] = [entry for entry in chunk["hazards"] if entry.id != hazard.id]
 

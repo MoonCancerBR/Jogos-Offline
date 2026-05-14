@@ -5,6 +5,7 @@ from pygame.math import Vector2
 if __package__:
     from .constants import (
         BUFF_DURATION,
+        BASE_MAGAZINE_CAPACITY,
         PLAYER_BASE_SPEED,
         PLAYER_MAX_HEALTH,
         PLAYER_RADIUS,
@@ -12,15 +13,18 @@ if __package__:
         PROJECTILE_LIFE,
         PROJECTILE_RADIUS,
         SHIELD_DURATION,
+        STARTING_AMMO_RESERVE,
         SPECIAL_MAX,
         SWORD_ARC,
         SWORD_DAMAGE,
         SWORD_DURATION,
         SWORD_RADIUS,
+        CHARACTERS,
     )
 else:
     from constants import (
         BUFF_DURATION,
+        BASE_MAGAZINE_CAPACITY,
         PLAYER_BASE_SPEED,
         PLAYER_MAX_HEALTH,
         PLAYER_RADIUS,
@@ -28,11 +32,13 @@ else:
         PROJECTILE_LIFE,
         PROJECTILE_RADIUS,
         SHIELD_DURATION,
+        STARTING_AMMO_RESERVE,
         SPECIAL_MAX,
         SWORD_ARC,
         SWORD_DAMAGE,
         SWORD_DURATION,
         SWORD_RADIUS,
+        CHARACTERS,
     )
 
 
@@ -74,12 +80,13 @@ class RectBody:
 
 @dataclass
 class Player:
+    char_class: str = "vanguard"
     pos: Vector2 = field(default_factory=lambda: Vector2(0, 0))
     radius: float = PLAYER_RADIUS
     max_health: float = PLAYER_MAX_HEALTH
     health: float = PLAYER_MAX_HEALTH
     base_speed: float = PLAYER_BASE_SPEED
-    mode: str = "projectile"
+    mode: str = "weapon_1"
     level: int = 1
     xp: float = 0
     xp_to_next: float = 55
@@ -87,6 +94,13 @@ class Player:
     kills: int = 0
     score: int = 0
     special: float = 0
+    special_ranged: float = 0
+    special_melee: float = 0
+    ammo_magazine: int = BASE_MAGAZINE_CAPACITY
+    ammo_reserve: int = STARTING_AMMO_RESERVE
+    reload_timer: float = 0
+    reload_duration: float = 0
+    forced_reload: bool = False
     shoot_timer: float = 0
     sword_timer: float = 0
     dash_timer: float = 0
@@ -102,9 +116,18 @@ class Player:
     sword_range_bonus: float = 0
     special_gain_bonus: float = 0
     vampirism: float = 0
-    ricochet_bounces: int = 0
-    poison_level: int = 0
-    projectile_count_bonus: int = 0
+    magazine_bonus: int = 0
+    reload_speed_bonus: float = 0
+    passives: dict = field(default_factory=dict)
+    # Multiplayer Co-op
+    player_index: int = 0
+    is_down: bool = False
+    revive_progress: float = 0.0
+
+    def __post_init__(self):
+        if self.char_class in CHARACTERS:
+            self.passives = {k: 0 for k in CHARACTERS[self.char_class]["passives"]}
+        self.xp_to_next = int(40 + 25 * self.level)
 
     def damage_multiplier(self):
         multiplier = 1.0 + self.damage_bonus
@@ -126,17 +149,19 @@ class Player:
     def projectile_damage(self):
         return PROJECTILE_DAMAGE * self.damage_multiplier()
 
-    def projectile_count(self):
-        return 1 + self.projectile_count_bonus
-
     def sword_damage(self):
         return SWORD_DAMAGE * self.damage_multiplier()
 
     def sword_radius(self):
         return SWORD_RADIUS * (1.0 + self.sword_range_bonus)
 
-    def add_special(self, amount):
-        self.special = min(SPECIAL_MAX, self.special + amount * (1.0 + self.special_gain_bonus))
+    def add_special(self, amount, channel="ranged"):
+        gained = amount * (1.0 + self.special_gain_bonus)
+        if channel == "melee":
+            self.special_melee = min(SPECIAL_MAX, self.special_melee + gained)
+        else:
+            self.special_ranged = min(SPECIAL_MAX, self.special_ranged + gained)
+        self.special = max(self.special_ranged, self.special_melee)
 
     def activate_buff(self, name):
         self.buffs[name] = BUFF_DURATION
@@ -164,7 +189,17 @@ class Enemy:
     poison_timer: float = 0
     poison_dps: float = 0
     hit_flash: float = 0
+    bleed_timer: float = 0
+    bleed_dps: float = 0
     knockback: Vector2 = field(default_factory=lambda: Vector2(0, 0))
+    lifetime: float = -1
+    phase: float = 0
+    special_timer: float = 0
+    summon_cooldown: float = 0.0
+    enraged: bool = False
+    action: str = ""
+    action_timer: float = 0
+    target_pos: Vector2 = field(default_factory=lambda: Vector2(0, 0))
 
 
 @dataclass
@@ -179,6 +214,10 @@ class Projectile:
     poison_dps: float = 0
     bounces_left: int = 0
     hit_ids: set = field(default_factory=set)
+    pierce: int = 0
+    explosive_level: int = 0
+    homing_level: int = 0
+    owner: int = 0
 
 
 @dataclass
@@ -191,6 +230,12 @@ class Slash:
     duration: float = SWORD_DURATION
     age: float = 0
     hit_ids: set = field(default_factory=set)
+    prey_mark_level: int = 0
+    execute_level: int = 0
+    shockwave_level: int = 0
+    bleed_level: int = 0
+    shadow_lunge_level: int = 0
+    owner: int = 0
 
 
 @dataclass
@@ -213,3 +258,11 @@ class Destructible:
     chunk: tuple
     hit_flash: float = 0
 
+
+@dataclass
+class Hazard:
+    id: str
+    rect: RectBody
+    kind: str
+    chunk: tuple
+    pulse: float = 0
