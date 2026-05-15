@@ -1105,7 +1105,7 @@ class GameLogic:
 
             projectile.life -= dt
             projectile.pos += projectile.vel * dt
-            if projectile.life <= 0 or self.world.circle_hits_wall(projectile.pos, projectile.radius):
+            if projectile.life <= 0 or self.world.circle_hits_wall(projectile.pos, projectile.radius, include_destructibles=False):
                 if projectile.explosive_level > 0:
                     self.item_events.append({
                         "type": "explosion",
@@ -1118,10 +1118,15 @@ class GameLogic:
                 continue
 
             hit = False
+            min_damage_required = (SWORD_DAMAGE // 10) * 10 - 5
             for item in self.world.nearby_destructibles(projectile.pos.x, projectile.pos.y, projectile.radius + 24):
+                if item.id in projectile.hit_ids:
+                    continue
                 if circle_rect_overlap(projectile.pos.x, projectile.pos.y, projectile.radius, item.rect):
-                    self.damage_destructible(item, projectile.damage)
+                    projectile.hit_ids.add(item.id)
                     hit = True
+                    if projectile.damage >= min_damage_required:
+                        self.damage_destructible(item, projectile.damage)
                     break
             if hit:
                 if projectile.explosive_level > 0:
@@ -1133,6 +1138,11 @@ class GameLogic:
                         "age": 0,
                         "duration": 0.2
                     })
+                if projectile.pierce > 0:
+                    projectile.pierce -= 1
+                    alive.append(projectile)
+                elif self._try_ricochet(projectile):
+                    alive.append(projectile)
                 continue
 
             for enemy in list(self.enemies):
@@ -2084,11 +2094,48 @@ class GameLogic:
         self.message = "Mini-boss derrotado: vida cheia, +3 niveis e recompensa."
 
     def _grant_bonus_levels(self, amount, player_index=0):
+        if self.multiplayer:
+            major = False
+            for _ in range(amount):
+                self.shared_level += 1
+                for p in self.players:
+                    p.level = self.shared_level
+                    self._apply_level_up_stats(p)
+                for inv in self.inventories:
+                    inv.points += 1
+                if self.shared_level % 3 == 0:
+                    major = True
+                    for inv in self.inventories:
+                        inv.points += 2
+                    for p in self.players:
+                        if not p.is_down:
+                            self.spawn_drop("item_box", p.pos + self.random_offset(130), 1)
+            self.shared_xp = 0
+            self.shared_xp_to_next = int(40 + 25 * self.shared_level)
+            self.level_up_pending = True
+            self.upgrade_is_major = major
+            if major:
+                self.level_up_player_index = 0
+                self.draft_active = False
+                self.upgrade_choices = self.generate_upgrade_choices(True, 0)
+            else:
+                self.draft_active = True
+                self.draft_turn_player = self.draft_first_picker
+                if len(self.players) > 1 and self.players[self.draft_turn_player].is_down:
+                    other_player = 1 - self.draft_turn_player
+                    if not self.players[other_player].is_down:
+                        self.draft_turn_player = other_player
+                self.level_up_player_index = self.draft_turn_player
+                self.upgrade_choices = self.generate_upgrade_choices(False, self.draft_turn_player)
+                self.draft_first_picker = 1 - self.draft_first_picker
+            return
+
         player = self.get_player(player_index)
         inv = self.get_inventory(player_index)
         major = False
         for _ in range(amount):
             player.level += 1
+            self._apply_level_up_stats(player)
             inv.points += 1
             if player.level % 3 == 0:
                 major = True
@@ -2252,10 +2299,26 @@ class GameLogic:
         self.message = message
         return success
 
+    def buy_shop_item(self, item_key):
+        inv = self.get_inventory(self.menu_player_index)
+        cost = 15
+        if inv.points < cost:
+            self.message = f"Pontos insuficientes para comprar (custa {cost})."
+            return False
+            
+        inv.points -= cost
+        status, item = inv.add_item(item_key)
+        self.message = f"Item {item.key} adquirido no Mercado Negro!"
+        return True
+
     def skill_upgrade_cost(self, key):
         player = self.get_player(self.menu_player_index)
         data = CHARACTERS[player.char_class]["passives"].get(key, {})
-        return SPECIAL_SKILL_UPGRADE_COST if data.get("category") == "Especial" else SKILL_UPGRADE_COST
+        level = player.passives.get(key, 0)
+        is_special = data.get("category") == "Especial"
+        if level == 0:
+            return SPECIAL_SKILL_UNLOCK_COST if is_special else SKILL_UNLOCK_COST
+        return SPECIAL_SKILL_UPGRADE_COST if is_special else SKILL_UPGRADE_COST
 
     def upgrade_skill(self, key):
         player = self.get_player(self.menu_player_index)
@@ -2294,7 +2357,12 @@ class GameLogic:
 
     def confirm_pending_fusion(self):
         inv = self.get_inventory(self.menu_player_index)
+        if inv.points < FUSION_COST:
+            self.message = f"Pontos insuficientes para fusao (custa {FUSION_COST})."
+            return False
         success, message = inv.fuse_marked_items()
+        if success:
+            inv.points -= FUSION_COST
         self.message = message
         return success
 
@@ -2302,6 +2370,11 @@ class GameLogic:
         inv = self.get_inventory(self.menu_player_index)
         inv.clear_fusion_marks()
         self.message = "Fusao cancelada."
+
+    def _apply_level_up_stats(self, player):
+        for stat in STAT_SHOP_STATS:
+            val = 0.01 if stat["kind"] == "percent" else 1.0
+            self._apply_stat_shop_effect(stat["key"], val, player)
 
     def add_xp(self, amount, player=None):
         if player is None:
@@ -2318,6 +2391,7 @@ class GameLogic:
                 self.shared_level += 1
                 for p in self.players:
                     p.level = self.shared_level # Sincroniza níveis
+                    self._apply_level_up_stats(p)
                 
                 # Pontos de inventário ainda são individuais para cada nível
                 for inv in self.inventories:
@@ -2340,9 +2414,6 @@ class GameLogic:
                     
                     # Upgrades grandes são individuais (um após o outro)
                     self.level_up_player_index = 0
-                    if len(self.players) > 1 and self.players[0].is_down and not self.players[1].is_down:
-                        self.level_up_player_index = 1
-                        
                     self.draft_active = False
                     self.upgrade_choices = self.generate_upgrade_choices(True, self.level_up_player_index)
                 else:
@@ -2372,6 +2443,7 @@ class GameLogic:
         while player.xp >= player.xp_to_next:
             player.xp -= player.xp_to_next
             player.level += 1
+            self._apply_level_up_stats(player)
             inv.points += 1
             player.xp_to_next = int(40 + 25 * player.level)
             self.level_up_pending = True

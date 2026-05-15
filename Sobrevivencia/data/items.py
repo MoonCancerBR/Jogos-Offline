@@ -47,6 +47,11 @@ class InventoryItem:
     level: int = 1
     hybrid_sources: tuple = field(default_factory=tuple)
     timers: dict = field(default_factory=dict)
+    slot_key: str = None
+
+    def __post_init__(self):
+        if self.slot_key is None:
+            self.slot_key = self.key
 
     @property
     def rank(self):
@@ -76,18 +81,27 @@ class Inventory:
         self.active_slots = []
         self.points = 0
         self.fusion_marks = []
+        self.black_market_unlocked = False
+
+    def check_black_market_unlock(self):
+        if self.black_market_unlocked:
+            return
+        for item in self.items.values():
+            if item.is_relic and item.level >= MAX_ITEM_LEVEL:
+                self.black_market_unlocked = True
+                break
 
     def item_list(self):
         return list(self.items.values())
 
     def active_items(self):
-        return [self.items[key] for key in self.active_slots if key in self.items]
+        return [self.items[k] for k in self.active_slots if k in self.items]
 
     def get(self, key):
         return self.items.get(key)
 
-    def is_active(self, key):
-        return key in self.active_slots
+    def is_active(self, slot_key):
+        return slot_key in self.active_slots
 
     def add_random_item(self, rng):
         eligible_hybrids = [item for item in self.items.values() if item.is_hybrid and item.level < MAX_ITEM_LEVEL]
@@ -117,17 +131,29 @@ class Inventory:
         return self.add_item(rng.choice(eligible_base))
 
     def add_item(self, key):
-        if key in self.items:
-            item = self.items[key]
-            if item.level < MAX_ITEM_LEVEL:
-                item.level += 1
-                return "level_up", item
-            return "duplicate_max", item
+        target_dict_key = None
+        for k, v in self.items.items():
+            if v.key == key and v.level < MAX_ITEM_LEVEL:
+                target_dict_key = k
+                break
 
-        item = InventoryItem(key=key)
-        self.items[key] = item
+        if target_dict_key:
+            item = self.items[target_dict_key]
+            item.level += 1
+            self.check_black_market_unlock()
+            return "level_up", item
+
+        new_dict_key = key
+        count = 1
+        while new_dict_key in self.items:
+            new_dict_key = f"{key}_dup_{count}"
+            count += 1
+
+        item = InventoryItem(key=key, slot_key=new_dict_key)
+        self.items[new_dict_key] = item
         if len(self.active_slots) < MAX_ACTIVE_ITEMS:
-            self.active_slots.append(key)
+            self.active_slots.append(new_dict_key)
+        self.check_black_market_unlock()
         return "new", item
 
     def add_relic(self, relic_source_key):
@@ -136,16 +162,30 @@ class Inventory:
             return "invalid", None
         relic_key = "relic:" + relic_source_key
         sources = tuple(relic_source_key.split("+"))
-        if relic_key in self.items:
-            item = self.items[relic_key]
-            if item.level < MAX_ITEM_LEVEL:
-                item.level += 1
-                return "level_up", item
-            return "duplicate_max", item
-        item = InventoryItem(key=relic_key, level=1, hybrid_sources=sources)
-        self.items[relic_key] = item
+        
+        target_dict_key = None
+        for k, v in self.items.items():
+            if v.key == relic_key and v.level < MAX_ITEM_LEVEL:
+                target_dict_key = k
+                break
+
+        if target_dict_key:
+            item = self.items[target_dict_key]
+            item.level += 1
+            self.check_black_market_unlock()
+            return "level_up", item
+            
+        new_dict_key = relic_key
+        count = 1
+        while new_dict_key in self.items:
+            new_dict_key = f"{relic_key}_dup_{count}"
+            count += 1
+
+        item = InventoryItem(key=relic_key, level=1, hybrid_sources=sources, slot_key=new_dict_key)
+        self.items[new_dict_key] = item
         if len(self.active_slots) < MAX_ACTIVE_ITEMS:
-            self.active_slots.append(relic_key)
+            self.active_slots.append(new_dict_key)
+        self.check_black_market_unlock()
         return "new", item
 
     def toggle_active(self, key):
@@ -158,6 +198,29 @@ class Inventory:
             return False, "Slots ativos cheios."
         self.active_slots.append(key)
         return True, "Item equipado."
+
+    def get_sell_value(self, key):
+        item = self.items.get(key)
+        if not item:
+            return 0
+        if item.rank == 3: # Relic
+            return 15 + (item.level - 1) * 5
+        if item.rank == 2: # Hybrid
+            return 5 + (item.level - 1) * 2
+        return 1 + (item.level - 1) // 2 # Basic
+
+    def sell_item(self, key):
+        if key not in self.items:
+            return False, "Item nao encontrado."
+        
+        value = self.get_sell_value(key)
+        self.points += value
+        
+        self.items.pop(key)
+        if key in self.active_slots:
+            self.active_slots.remove(key)
+            
+        return True, f"Item vendido por {value} pontos."
 
     def upgrade_with_point(self, key):
         item = self.items.get(key)
@@ -179,7 +242,45 @@ class Inventory:
 
         self.points -= cost
         item.level += 1
+        self.check_black_market_unlock()
         return True, "Item aprimorado."
+
+    def attempt_transformation(self, dict_key, rng):
+        item = self.items.get(dict_key)
+        if not item or item.rank != 1 or item.level < MAX_ITEM_LEVEL:
+            return False, "Requisitos nao atendidos."
+        if self.points < 15:
+            return False, "Sem moedas suficientes (15)."
+
+        self.points -= 15
+
+        chance = rng.random()
+        if chance < 0.5: # 50% success
+            other_keys = [k for k in BASE_ITEM_KEYS if k != item.key]
+            other = rng.choice(other_keys)
+            sources = tuple(sorted([item.key, other]))
+            hybrid_key = "hybrid:" + "+".join(sources)
+
+            # Remove old
+            self.items.pop(dict_key)
+            if dict_key in self.active_slots:
+                self.active_slots.remove(dict_key)
+
+            # Add new
+            new_item = InventoryItem(key=hybrid_key, level=1, hybrid_sources=sources, slot_key=hybrid_key)
+            self.items[new_item.slot_key] = new_item
+            if len(self.active_slots) < MAX_ACTIVE_ITEMS:
+                self.active_slots.append(new_item.slot_key)
+            self.check_black_market_unlock()
+            return True, "Sucesso! Item evoluiu para Hibrido."
+        else:
+            if rng.random() < 0.5: # 25% intact
+                return False, "Falha! O item permaneceu intacto."
+            else: # 25% degrade
+                other_keys = [k for k in BASE_ITEM_KEYS if k != item.key]
+                other = rng.choice(other_keys)
+                item.key = other # Degrades to another base item
+                return False, f"Degradacao! Transformou-se em {ITEM_DEFINITIONS[other]['name']}."
 
     def mark_for_fusion(self, key):
         item = self.items.get(key)
@@ -224,18 +325,30 @@ class Inventory:
         first = self.items.get(first_key)
         second = self.items.get(second_key)
 
-        if first is None or second is None or first.key == second.key:
+        if first is None or second is None:
             return False, None, "Fusao invalida."
+            
+        if first.key == second.key and first_key != second_key and first.rank == 1:
+            pass # Permitida a fusão de dois itens idênticos do Rank 1
+        elif first.key == second.key:
+            return False, None, "Fusao invalida. Mesma chave base."
+
         if first.level < MAX_ITEM_LEVEL or second.level < MAX_ITEM_LEVEL:
             return False, None, "Fusao exige dois itens nivel 10."
         if first.rank != second.rank:
             return False, None, "So e possivel fundir itens do mesmo ranking."
 
-        combined_sources = tuple(sorted(set(first.effect_keys() + second.effect_keys())))
+        if first.key == second.key and first.rank == 1:
+            import random
+            other_keys = [k for k in BASE_ITEM_KEYS if k != first.key]
+            other_key = random.Random(hash(first_key + second_key)).choice(other_keys)
+            combined_sources = tuple(sorted([first.key, other_key]))
+        else:
+            combined_sources = tuple(sorted(set(first.effect_keys() + second.effect_keys())))
 
         if first.rank == 1:
             hybrid_key = "hybrid:" + "+".join(combined_sources)
-            hybrid = InventoryItem(key=hybrid_key, level=1, hybrid_sources=combined_sources)
+            hybrid = InventoryItem(key=hybrid_key, level=1, hybrid_sources=combined_sources, slot_key=hybrid_key)
             return True, hybrid, "Item hibrido sera criado."
 
         if first.rank == 2:
@@ -245,7 +358,7 @@ class Inventory:
             if relic_source_key not in RELIC_DEFINITIONS:
                 return False, None, "Combinacao de Reliquia invalida."
             relic_key = "relic:" + relic_source_key
-            relic = InventoryItem(key=relic_key, level=1, hybrid_sources=combined_sources)
+            relic = InventoryItem(key=relic_key, level=1, hybrid_sources=combined_sources, slot_key=relic_key)
             return True, relic, "Reliquia sera forjada."
 
         return False, None, "Fusao nao suportada para este ranking."
@@ -262,9 +375,18 @@ class Inventory:
             self.items.pop(key, None)
             if key in self.active_slots:
                 self.active_slots.remove(key)
-        self.items[result_item.key] = result_item
+                
+        new_dict_key = result_item.key
+        count = 1
+        while new_dict_key in self.items:
+            new_dict_key = f"{result_item.key}_dup_{count}"
+            count += 1
+            
+        result_item.slot_key = new_dict_key
+        self.items[new_dict_key] = result_item
         if len(self.active_slots) < MAX_ACTIVE_ITEMS:
-            self.active_slots.append(result_item.key)
+            self.active_slots.append(new_dict_key)
+        self.check_black_market_unlock()
 
         if result_item.is_relic:
             return True, "Reliquia forjada!"

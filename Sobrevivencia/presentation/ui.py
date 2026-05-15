@@ -1,5 +1,5 @@
 import math
-from itertools import combinations
+from itertools import combinations, combinations_with_replacement
 
 import pygame
 from pygame.math import Vector2
@@ -475,6 +475,19 @@ class UI:
         self._bar(304, 12, 136, 12, player.special_ranged / SPECIAL_MAX, COLORS["special"], "#0B2C3C", "ESP DIST")
         self._bar(304, 31, 136, 12, player.special_melee / SPECIAL_MAX, COLORS["sword"], "#3A2A08", "ESP MELEE")
 
+        # Aviso pulsante quando ambas as barras estão cheias
+        if player.special_ranged >= SPECIAL_MAX and player.special_melee >= SPECIAL_MAX:
+            pulse = (pygame.time.get_ticks() // 400) % 2 == 0
+            if pulse:
+                suprema_surf = self.font_small.render("★ SUPREMA DISPONIVEL ★", True, (250, 204, 21))
+                bg_w = suprema_surf.get_width() + 16
+                bg_h = suprema_surf.get_height() + 6
+                bg_surf = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
+                pygame.draw.rect(bg_surf, (20, 10, 0, 200), bg_surf.get_rect(), border_radius=5)
+                pygame.draw.rect(bg_surf, (250, 204, 21, 180), bg_surf.get_rect(), width=1, border_radius=5)
+                self.screen.blit(bg_surf, (304, 50))
+                self.screen.blit(suprema_surf, (312, 53))
+
         w_name = CHARACTERS[player.char_class][player.mode]
         mode_color = COLORS["sword"] if player.mode == "weapon_2" else COLORS["projectile"]
         self._pill(448, 18, 96, 23, w_name.upper(), mode_color)
@@ -505,17 +518,17 @@ class UI:
             message += "..."
         self.screen.blit(self.font_tiny.render(message, True, hex_color(COLORS["muted"])), (632, 44))
 
-        self._draw_buff_list(player)
         self._draw_item_slots(game)
         self._draw_passive_slots(game)
         self._draw_stats_panel(game)
         self._draw_quest_panel(game)
+        self._draw_buff_list(player, SCREEN_WIDTH - 24, 324, align_right=True)
 
     def _draw_coop_hud(self, game):
         pygame.draw.rect(self.screen, hex_color(COLORS["panel"]), (0, 0, SCREEN_WIDTH, 90))
         pygame.draw.line(self.screen, (30, 41, 59), (0, 90), (SCREEN_WIDTH, 90), 2)
         self._draw_player_hud_block(game, game.player, 24, 12, left=True)
-        self._draw_player_hud_block(game, game.player2, SCREEN_WIDTH - 334, 12, left=False)
+        self._draw_player_hud_block(game, game.player2, SCREEN_WIDTH - 418, 12, left=False)
 
         coins = game.shared_coins
         score = sum(player.score for player in game.players)
@@ -531,6 +544,9 @@ class UI:
             self._center_text(f"Turno do Jogador {game.level_up_player_index + 1}", self.font_tiny, 64, COLORS["upgrade"])
         self._draw_coop_stats_panels(game)
         self._draw_quest_panel(game)
+        self._draw_buff_list(game.player, 14, 410, align_right=False)
+        if getattr(game, 'player2', None):
+            self._draw_buff_list(game.player2, SCREEN_WIDTH - 14, 410, align_right=True)
 
     def _draw_player_hud_block(self, game, player, x, y, left=True):
         title = f"J{player.player_index + 1}  {CHARACTERS[player.char_class]['name']}"
@@ -611,23 +627,26 @@ class UI:
                 self.screen.blit(bg_surf, bg_rect.topleft)
                 self.screen.blit(lvl_surf, lvl_rect)
 
-    def _draw_buff_list(self, player):
+    def _draw_buff_list(self, player, start_x, start_y, align_right=False):
         labels = {
             "freeze": "congelante",
             "speed": "velocidade",
             "power": "dano",
         }
-        passive_width = len(player.passives) * 28
-        x = SCREEN_WIDTH - 30 - passive_width
-        y = 44
+        y = start_y
+        
+        active_buffs = []
         if player.shield_timer > 0:
-            x -= 86
-            self._pill(x, y, 78, 22, f"escudo {player.shield_timer:.0f}s", COLORS["shield"])
+            active_buffs.append(("escudo", player.shield_timer, COLORS["shield"]))
         for name, timer in player.buffs.items():
-            text = f"{labels.get(name, name)} {timer:.0f}s"
+            active_buffs.append((labels.get(name, name), timer, COLORS["upgrade"]))
+            
+        for name, timer, color in active_buffs:
+            text = f"{name} {timer:.0f}s"
             width = max(82, self.font_tiny.size(text)[0] + 18)
-            x -= width + 8
-            self._pill(x, y, width, 22, text, COLORS["upgrade"])
+            x = start_x - width if align_right else start_x
+            self._pill(x, y, width, 22, text, color)
+            y += 28
 
     def _draw_coop_stats_panels(self, game):
         if game.player2 is None:
@@ -903,7 +922,7 @@ class UI:
         # pygame.display.flip()
         return buttons
 
-    def render_stat_shop(self, game, mouse_pos):
+    def render_stat_shop(self, game, selected, mouse_pos):
         self.render_game(game, mouse_pos, flip=False)
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((5, 10, 18, 224))
@@ -941,8 +960,8 @@ class UI:
             self._center_text("Role a loja para revelar tres melhorias permanentes.", self.font, 252, COLORS["text"])
             self._center_text("Os custos de compra aumentam conforme a forca e a quantidade de status.", self.font_small, 292, COLORS["muted"])
             color = COLORS["xp"] if game.inventory.points >= STAT_SHOP_ROLL_COST else COLORS["muted_2"]
-            buttons.append(self._button(panel.centerx - 130, 366, 260, 48, f"Roletar ({STAT_SHOP_ROLL_COST} pt)", "stat_shop_roll", mouse_pos, color))
-            buttons.append(self._button(panel.centerx - 110, panel.bottom - 56, 220, 40, "Voltar", "stat_shop_back", mouse_pos, COLORS["muted_2"]))
+            buttons.append(self._button(panel.centerx - 130, 366, 260, 48, f"Roletar ({STAT_SHOP_ROLL_COST} pt) - A/Y/Enter", "stat_shop_roll", mouse_pos, color))
+            buttons.append(self._button(panel.centerx - 110, panel.bottom - 56, 220, 40, "Voltar - B/Esc", "stat_shop_back", mouse_pos, COLORS["muted_2"]))
             # pygame.display.flip()
             return buttons
 
@@ -962,10 +981,15 @@ class UI:
             x = start_x + index * (card_w + gap)
             rect = pygame.Rect(x, y, card_w, card_h)
             hover = rect.collidepoint(mouse_pos)
+            is_selected = (index == selected)
             rank_color = rarity_colors.get(offer.get("power", 1), COLORS["panel_2"])
-            bg = (13, 22, 36) if not hover else (19, 32, 50)
+            bg = (13, 22, 36) if not (hover or is_selected) else (19, 32, 50)
             pygame.draw.rect(self.screen, bg, rect, border_radius=8)
-            pygame.draw.rect(self.screen, hex_color(rank_color), rect, width=2, border_radius=8)
+            
+            # Border: Red if selected via joystick/keyboard, rank color otherwise
+            border_color = (220, 38, 38) if is_selected else hex_color(rank_color)
+            border_width = 4 if is_selected else 2
+            pygame.draw.rect(self.screen, border_color, rect, width=border_width, border_radius=8)
 
             title = self.font.render(offer["title"].upper(), True, hex_color(COLORS["text"]))
             self.screen.blit(title, (rect.x + 18, rect.y + 16))
@@ -986,12 +1010,12 @@ class UI:
             self.screen.blit(cost_surf, (rect.x + 18, rect.bottom - 106))
 
             buy_color = COLORS["xp"] if game.inventory.points >= cost else COLORS["muted_2"]
-            buttons.append(self._button(rect.x + 18, rect.bottom - 78, rect.w - 36, 34, f"Comprar ({cost})", f"stat_shop_buy:{index}", mouse_pos, buy_color))
+            buttons.append(self._button(rect.x + 18, rect.bottom - 78, rect.w - 36, 34, f"Comprar ({cost}) - A", f"stat_shop_buy:{index}", mouse_pos, buy_color))
             reroll_color = COLORS["special"] if game.inventory.points >= STAT_SHOP_REROLL_COST else COLORS["muted_2"]
-            buttons.append(self._button(rect.x + 18, rect.bottom - 38, rect.w - 36, 30, f"Jogar novamente ({STAT_SHOP_REROLL_COST})", f"stat_shop_reroll:{index}", mouse_pos, reroll_color))
+            buttons.append(self._button(rect.x + 18, rect.bottom - 38, rect.w - 36, 30, f"Reroll ({STAT_SHOP_REROLL_COST}) - X", f"stat_shop_reroll:{index}", mouse_pos, reroll_color))
 
-        self._center_text("Teclas 1/2/3 compram as ofertas. Esc volta ao pause.", self.font_tiny, panel.bottom - 74, COLORS["muted"])
-        buttons.append(self._button(panel.centerx - 110, panel.bottom - 44, 220, 34, "Voltar", "stat_shop_back", mouse_pos, COLORS["muted_2"]))
+        self._center_text("Teclas 1/2/3 compram as ofertas. Esc volta ao pause. (Joystick: A compra, X reroll)", self.font_tiny, panel.bottom - 74, COLORS["muted"])
+        buttons.append(self._button(panel.centerx - 110, panel.bottom - 44, 220, 34, "Voltar - B/Esc", "stat_shop_back", mouse_pos, COLORS["muted_2"]))
         # pygame.display.flip()
         return buttons
 
@@ -1059,7 +1083,7 @@ class UI:
         # pygame.display.flip() # Handled by main loop
         return buttons
 
-    def render_inventory(self, game, selected, mouse_pos, flip=True):
+    def render_inventory(self, game, selected, mouse_pos, inventory_tab="items", flip=True):
         self.render_game(game, mouse_pos, flip=False)
         inv = game.get_inventory(game.menu_player_index)
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -1077,12 +1101,55 @@ class UI:
             other = 2 if game.menu_player_index == 0 else 1
             buttons.append(self._button(790, 112, 230, 34, f"Ver Jogador {other}", "toggle_menu_player", mouse_pos, COLORS["special"]))
 
-        if not raw_items:
+        if inv.black_market_unlocked:
+            tab_color1 = COLORS["xp"] if inventory_tab == "items" else COLORS["muted"]
+            tab_color2 = COLORS["special"] if inventory_tab == "shop" else COLORS["muted"]
+            self.screen.blit(self.font.render("[L1] Itens", True, hex_color(tab_color1)), (120, 112))
+            self.screen.blit(self.font.render("[R1] Loja (Mercado Negro)", True, hex_color(tab_color2)), (300, 112))
+
+        items = []  # Garante que items está sempre definido
+        if inventory_tab == "shop":
+            shop_keys = list(BASE_ITEM_KEYS)
+            selected = max(0, min(selected, len(shop_keys) - 1))
+            self.screen.blit(self.font_small.render("Itens Basicos a Venda (Custo: 15 pt)", True, hex_color(COLORS["text"])), (120, 160))
+            
+            slot_size = 64
+            spacing = 16
+            for i, key in enumerate(shop_keys):
+                rect = pygame.Rect(120 + i * (slot_size + spacing), 184, slot_size, slot_size)
+                hover = rect.collidepoint(mouse_pos)
+                is_selected = i == selected
+                color = COLORS["upgrade"] if is_selected else COLORS["panel_2"]
+                if hover: color = COLORS["special"]
+                pygame.draw.rect(self.screen, hex_color(color), rect, border_radius=6)
+                pygame.draw.rect(self.screen, (226, 232, 240), rect, width=1 if is_selected else 0, border_radius=6)
+                
+                mock_item = InventoryItem(key=key)
+                self._draw_item_icon(mock_item, rect, game, show_level=False)
+                buttons.append((f"shop_select:{i}", rect))
+                
+            panel_x = 780
+            panel_y = 190
+            selected_key = shop_keys[selected]
+            mock_item = InventoryItem(key=selected_key)
+            name = item_display_name(mock_item)
+            wrapped = [
+                name[:28],
+                "Nivel base 1. Comprar igual sobe de nivel.",
+                item_short_description(mock_item)[:34],
+            ]
+            for offset, line in enumerate(wrapped):
+                self.screen.blit(self.font_small.render(line, True, hex_color(COLORS["text"] if offset == 0 else COLORS["muted"])), (panel_x, panel_y + offset * 28))
+                
+            can_buy = inv.points >= 15
+            buttons.append(self._button(panel_x, panel_y + 112, 230, 42, "Comprar (15 pts) - A", "shop_buy", mouse_pos, COLORS["xp"] if can_buy else COLORS["muted_2"]))
+
+        elif not raw_items:
             self._center_text("Destrua Caixas Especiais para encontrar itens passivos.", self.font, 274, COLORS["muted"])
             items = []
         else:
-            active_items = [item for item in raw_items if inv.is_active(item.key)]
-            reserve_items = [item for item in raw_items if not inv.is_active(item.key)]
+            active_items = [item for item in raw_items if inv.is_active(item.slot_key)]
+            reserve_items = [item for item in raw_items if not inv.is_active(item.slot_key)]
             items = active_items + reserve_items
             selected = max(0, min(selected, len(items) - 1))
 
@@ -1132,27 +1199,38 @@ class UI:
             ]
             for offset, line in enumerate(wrapped):
                 self.screen.blit(self.font_small.render(line, True, hex_color(COLORS["text"] if offset == 0 else COLORS["muted"])), (panel_x, panel_y + offset * 28))
-            equip_label = "Remover dos ativos" if inv.is_active(selected_item.key) else "Equipar"
+            equip_label = "Remover dos ativos" if inv.is_active(selected_item.slot_key) else "Equipar"
             buttons.append(self._button(panel_x, panel_y + 112, 230, 42, equip_label, "item_toggle", mouse_pos, COLORS["special"]))
             if selected_item.is_relic:
                 cost = 7
-                rank_label = "RELIQUIA"
+                rank_label = "RELIQUIA (Rank 3)"
                 rank_color = (250, 180, 50)
             elif selected_item.is_hybrid:
                 cost = 3
-                rank_label = "HIBRIDO"
+                rank_label = "HIBRIDO (Rank 2)"
                 rank_color = hex_color(COLORS["upgrade"])
             else:
                 cost = 1
-                rank_label = "BASICO"
-                rank_color = hex_color(COLORS["muted"])
+                rank_label = "BASICO (Rank 1)"
+                rank_color = (205, 127, 50)  # Bronze para Tier 1
             rank_surf = self.font_tiny.render(f"Rank: {rank_label}", True, rank_color)
             self.screen.blit(rank_surf, (panel_x, panel_y + 90))
-            buttons.append(self._button(panel_x, panel_y + 166, 230, 42, f"Upar ({cost} pts)", "item_upgrade", mouse_pos, COLORS["xp"]))
+            
+            if selected_item.rank == 1 and selected_item.level >= 10 and inv.black_market_unlocked:
+                buttons.append(self._button(panel_x, panel_y + 166, 230, 42, "Transformar (15 pts)", "item_transform", mouse_pos, COLORS["special"]))
+            else:
+                buttons.append(self._button(panel_x, panel_y + 166, 230, 42, f"Upar ({cost} pts)", "item_upgrade", mouse_pos, COLORS["xp"]))
+                
             fuse_label = "Marcar/Fundir" if not selected_item.is_relic else "(Reliquia: sem fusao)"
             buttons.append(self._button(panel_x, panel_y + 220, 230, 42, fuse_label, "item_fuse", mouse_pos, COLORS["upgrade"]))
+            
+            sell_value = inv.get_sell_value(selected_item.slot_key)
+            if not inv.is_active(selected_item.slot_key):
+                buttons.append(self._button(panel_x, panel_y + 274, 230, 42, f"Vender ({sell_value} pts)", "item_sell", mouse_pos, "#DC2626")) # Vermelho para venda
+            else:
+                self.screen.blit(self.font_tiny.render("(Desequipe para vender)", True, COLORS["muted_2"]), (panel_x, panel_y + 286))
 
-        hint = "I/TAB volta ao jogo  |  ENTER equipa  |  U upa  |  F marca fusao"
+        hint = "I/Esc volta  |  Tab/Q troca aba  |  ENTER equipa  |  U upa  |  F fundir  |  S vender"
         if game.multiplayer:
             hint += "  |  P troca jogador"
         self._center_text(hint, self.font_tiny, 640, COLORS["muted"])
@@ -1181,9 +1259,9 @@ class UI:
 
         title = self.font_title.render("GERENCIAMENTO DE SKILLS", True, hex_color(COLORS["text"]))
         self.screen.blit(title, (panel.x + 28, panel.y + 18))
-        switch_hint = "  |  P troca jogador" if game.multiplayer else ""
+        switch_hint = "  |  Y/P troca jogador" if game.multiplayer else ""
         subtitle = self.font_tiny.render(
-            f"Jogador {game.menu_player_index + 1}  |  Pontos de item {inv.points}  |  U/Enter upa skill{switch_hint}  |  comuns custam {SKILL_UPGRADE_COST}, especiais custam {SPECIAL_SKILL_UPGRADE_COST}",
+            f"Jogador {game.menu_player_index + 1}  |  Pontos de item {inv.points}  |  A/X/U/Enter upa skill{switch_hint}",
             True,
             hex_color(COLORS["muted"]),
         )
@@ -1266,7 +1344,7 @@ class UI:
                 "item": InventoryItem(key=key),
             })
 
-        for first, second in combinations(BASE_ITEM_KEYS, 2):
+        for first, second in combinations_with_replacement(BASE_ITEM_KEYS, 2):
             sources = tuple(sorted((first, second)))
             entries.append({
                 "tier": 2,
@@ -1383,12 +1461,36 @@ class UI:
             self._center_text(message, self.font, panel.y + 220, COLORS["danger"])
 
         buttons = []
-        actions = [("Confirmar", "fusion_confirm_yes", COLORS["xp"]), ("Cancelar", "fusion_confirm_no", COLORS["muted_2"])]
+        actions = [(f"Confirmar ({FUSION_COST} pts)", "fusion_confirm_yes", COLORS["xp"]), ("Cancelar", "fusion_confirm_no", COLORS["muted_2"])]
         for index, (label, action, color) in enumerate(actions):
             button_color = COLORS["upgrade"] if index == choice_selected else color
             buttons.append(self._button(panel.x + 126 + index * 230, panel.bottom - 58, 170, 40, label, action, mouse_pos, button_color))
 
         # pygame.display.flip()
+        return buttons
+
+    def render_point_confirm(self, game, cost, message, selected, mouse_pos):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((5, 10, 18, 176))
+        self.screen.blit(overlay, (0, 0))
+
+        panel = pygame.Rect(SCREEN_WIDTH // 2 - 250, SCREEN_HEIGHT // 2 - 120, 500, 240)
+        pygame.draw.rect(self.screen, (9, 15, 26), panel, border_radius=8)
+        pygame.draw.rect(self.screen, hex_color(COLORS["xp"]), panel, width=2, border_radius=8)
+
+        self._center_text("CONFIRMAR COMPRA", self.font_title, panel.y + 24, COLORS["text"])
+
+        y = panel.y + 80
+        for line in self._wrap_text(message, 44)[:3]:
+            self._center_text(line, self.font, y, COLORS["muted"])
+            y += 24
+
+        buttons = []
+        actions = [(f"Confirmar ({cost} pts)", "point_confirm_yes", COLORS["xp"]), ("Cancelar", "point_confirm_no", COLORS["muted_2"])]
+        for index, (label, action, color) in enumerate(actions):
+            button_color = COLORS["upgrade"] if index == selected else color
+            buttons.append(self._button(panel.x + 60 + index * 200, panel.bottom - 60, 180, 40, label, action, mouse_pos, button_color))
+
         return buttons
 
     def _draw_item_icon(self, item, rect, game, show_level=True):
@@ -1408,6 +1510,16 @@ class UI:
             else:
                 pygame.draw.circle(self.screen, hex_color(COLORS["special"]), rect.center, rect.width // 3)
 
+        # Tier 1 borders (Bronze)
+        if not item.is_relic and not item.is_hybrid:
+            pygame.draw.rect(self.screen, (205, 127, 50), rect, width=2, border_radius=6)
+        # Tier 2 borders (Silver)
+        elif item.is_hybrid:
+            pygame.draw.rect(self.screen, (192, 192, 192), rect, width=2, border_radius=6)
+        # Tier 3 borders (Gold)
+        elif item.is_relic:
+            pygame.draw.rect(self.screen, (255, 215, 0), rect, width=2, border_radius=6)
+
         if show_level:
             lvl_surf = self.font_tiny.render(str(item.level), True, hex_color(COLORS["text"]))
             lvl_rect = lvl_surf.get_rect(bottomright=(rect.right - 2, rect.bottom - 2))
@@ -1417,7 +1529,7 @@ class UI:
             self.screen.blit(bg_surf, bg_rect.topleft)
             self.screen.blit(lvl_surf, lvl_rect)
 
-        if game and item.key in game.get_inventory(game.menu_player_index).fusion_marks:
+        if game and item.slot_key in game.get_inventory(game.menu_player_index).fusion_marks:
             tag = self.font_tiny.render("F", True, hex_color(COLORS["text"]))
             pygame.draw.rect(self.screen, hex_color(COLORS["health"]), (rect.x + 2, rect.y + 2, tag.get_width() + 4, tag.get_height() + 4), border_radius=3)
             self.screen.blit(tag, (rect.x + 4, rect.y + 4))

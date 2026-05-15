@@ -2,11 +2,13 @@ import pygame
 from pygame.math import Vector2
 
 if __package__:
-    from .data.constants import FPS, SCREEN_HEIGHT, SCREEN_WIDTH, CHARACTERS, SPECIAL_COMBO_HOLD_SECONDS
+    from .data.constants import *
+    from .data.items import BASE_ITEM_KEYS
     from .core.game_logic import GameLogic
     from .presentation.ui import UI
 else:
-    from Sobrevivencia.data.constants import FPS, SCREEN_HEIGHT, SCREEN_WIDTH, CHARACTERS, SPECIAL_COMBO_HOLD_SECONDS
+    from Sobrevivencia.data.constants import *
+    from Sobrevivencia.data.items import BASE_ITEM_KEYS
     from Sobrevivencia.core.game_logic import GameLogic
     from Sobrevivencia.presentation.ui import UI
 
@@ -40,7 +42,8 @@ CONTROL_ACTIONS = [
     ("move_left", "Mover para esquerda"),
     ("move_right", "Mover para direita"),
     ("dash", "Dash"),
-    ("special", "Especial / combo"),
+    ("special", "Especial"),
+    ("combo_special", "Suprema (segure)"),
     ("toggle_weapon", "Alternar arma"),
     ("inventory", "Inventario"),
     ("skills", "Skills"),
@@ -61,6 +64,7 @@ DEFAULT_BINDINGS = {
     "move_right": [("key", pygame.K_d), ("key", pygame.K_RIGHT), None],
     "dash": [("key", pygame.K_SPACE), None, None],
     "special": [("key", pygame.K_e), None, None],
+    "combo_special": [("key", pygame.K_r), None, None],
     "toggle_weapon": [("key", pygame.K_q), ("key", pygame.K_LSHIFT), None],
     "inventory": [("key", pygame.K_i), ("key", pygame.K_TAB), None],
     "skills": [("key", pygame.K_k), None, None],
@@ -78,7 +82,8 @@ JOYSTICK_DEFAULT_BINDINGS = {
     "move_right": ("joy_axis", 0, 1),
     "dash": ("joy_button", 0),
     "special": ("joy_button", 2),
-    "toggle_weapon": ("joy_button", 3),
+    "combo_special": ("joy_button", 3),
+    "toggle_weapon": ("joy_button", 1),
     "inventory": ("joy_button", 6),
     "skills": ("joy_button", 5),
     "stat_shop": ("joy_button", 4),
@@ -122,8 +127,14 @@ class SobrevivenciaGame:
         settings_selected = 0
         settings_slot = 0
         fusion_confirm_selected = 0
+        self.point_confirm_action = None
+        self.point_confirm_cost = 0
+        self.point_confirm_msg = ""
+        self.point_confirm_return = ""
+        self.point_confirm_selected = 1
         game_over_selected = 0
         stat_shop_selected = 0
+        inventory_tab = "items"
         mode_selected = 0
         multiplayer_selected = False
         character_selected = 0
@@ -139,6 +150,9 @@ class SobrevivenciaGame:
         special_hold_time = {0: 0.0, 1: 0.0}
         special_hold_triggered = {0: False, 1: False}
         special_combo_checked = {0: False, 1: False}
+        combo_holding = {0: False, 1: False}
+        combo_hold_time = {0: 0.0, 1: 0.0}
+        combo_hold_triggered = {0: False, 1: False}
         joystick_aim_dir = Vector2(1, 0)
         aim_mode = "mouse"
         running = True
@@ -306,10 +320,55 @@ class SobrevivenciaGame:
                                 if state == "fusion_confirm":
                                     state, inventory_selected = self._handle_fusion_confirm_action(action, game, inventory_selected)
                                     break
+                                if state == "point_confirm":
+                                    if action == "self.point_confirm_yes":
+                                        state = self._handle_point_confirm_action(self.point_confirm_action, game, self.point_confirm_return)
+                                    elif action == "self.point_confirm_no":
+                                        state = self.point_confirm_return
+                                    break
                                 if action == "toggle_menu_player" and state in ("inventory", "skills"):
                                     game.menu_player_index = 1 - game.menu_player_index
                                     inventory_selected = 0
                                     skill_selected = 0
+                                    break
+                                elif action.startswith("shop_select:"):
+                                    inventory_selected = int(action.split(":")[1])
+                                    break
+                                elif action == "shop_buy":
+                                    shop_keys = list(BASE_ITEM_KEYS)
+                                    if inventory_selected < len(shop_keys):
+                                        cost = 15
+                                        if game.get_inventory(game.menu_player_index).points >= cost:
+                                            self.point_confirm_action = ("buy_shop_item", shop_keys[inventory_selected])
+                                            self.point_confirm_cost = cost
+                                            self.point_confirm_msg = f"Deseja gastar {cost} moedas para comprar este item?"
+                                            self.point_confirm_return = "inventory"
+                                            self.point_confirm_selected = 1
+                                            state = "point_confirm"
+                                        else:
+                                            game.message = f"Pontos insuficientes (custa {cost})."
+                                    break
+                                elif action == "item_transform":
+                                    inv = game.get_inventory(game.menu_player_index)
+                                    raw_items = inv.item_list()
+                                    active_items = [item for item in raw_items if inv.is_active(item.slot_key)]
+                                    reserve_items = [item for item in raw_items if not inv.is_active(item.slot_key)]
+                                    items = active_items + reserve_items
+                                    if inventory_selected < len(items):
+                                        item = items[inventory_selected]
+                                        cost = 15
+                                        if item.rank == 1 and item.level >= 10 and inv.black_market_unlocked:
+                                            if inv.points >= cost:
+                                                self.point_confirm_action = ("transform_inventory", item.slot_key)
+                                                self.point_confirm_cost = cost
+                                                self.point_confirm_msg = "Deseja gastar 15 moedas para tentar a Transformacao (Risco de Degradacao)?"
+                                                self.point_confirm_return = "inventory"
+                                                self.point_confirm_selected = 1
+                                                state = "point_confirm"
+                                            else:
+                                                game.message = f"Pontos insuficientes (custa {cost})."
+                                        else:
+                                            game.message = "Transformacao bloqueada ou requisitos nao atendidos."
                                     break
                                 if state == "inventory":
                                     state, inventory_selected = self._handle_inventory_action(action, state, game, inventory_selected)
@@ -610,14 +669,43 @@ class SobrevivenciaGame:
                     elif state == "inventory":
                         inv = game.get_inventory(game.menu_player_index)
                         raw_items = inv.item_list()
-                        active_items = [item for item in raw_items if inv.is_active(item.key)]
-                        reserve_items = [item for item in raw_items if not inv.is_active(item.key)]
+                        active_items = [item for item in raw_items if inv.is_active(item.slot_key)]
+                        reserve_items = [item for item in raw_items if not inv.is_active(item.slot_key)]
                         items = active_items + reserve_items
+                        
                         if self._menu_back_pressed() or self._action_pressed(event, controls, "inventory"):
                             state = "playing"
-                        elif game.multiplayer and self._menu_y_pressed():
+                        elif self._menu_r1_pressed() or self._menu_l1_pressed() or (event.type == pygame.KEYDOWN and event.key == pygame.K_t):
+                            if inv.black_market_unlocked:
+                                inventory_tab = "shop" if inventory_tab == "items" else "items"
+                                inventory_selected = 0
+                        elif game.multiplayer and self._menu_l3_pressed():
                             game.menu_player_index = 1 - game.menu_player_index
                             inventory_selected = 0
+                            
+                        elif inventory_tab == "shop":
+                            shop_items = list(BASE_ITEM_KEYS)
+                            if self._menu_up_pressed():
+                                inventory_selected -= 5
+                            elif self._menu_down_pressed():
+                                inventory_selected += 5
+                            elif self._menu_left_pressed():
+                                inventory_selected -= 1
+                            elif self._menu_right_pressed():
+                                inventory_selected += 1
+                            elif self._menu_confirm_pressed():
+                                cost = 15
+                                if inv.points >= cost:
+                                    self.point_confirm_action = ("buy_shop_item", shop_items[inventory_selected])
+                                    self.point_confirm_cost = cost
+                                    self.point_confirm_msg = f"Deseja gastar {cost} moedas para comprar este item?"
+                                    self.point_confirm_return = "inventory"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {cost})."
+                            inventory_selected = max(0, min(inventory_selected, len(shop_items) - 1))
+                            
                         elif items:
                             if self._menu_up_pressed():
                                 inventory_selected -= 5
@@ -628,15 +716,47 @@ class SobrevivenciaGame:
                             elif self._menu_right_pressed():
                                 inventory_selected += 1
                             elif self._menu_confirm_pressed():
-                                game.toggle_inventory_item(items[inventory_selected].key)
+                                game.toggle_inventory_item(items[inventory_selected].slot_key)
                             elif self._menu_x_pressed():
-                                game.upgrade_inventory_item(items[inventory_selected].key)
+                                item = items[inventory_selected]
+                                if item.rank == 1 and item.level >= 10 and inv.black_market_unlocked:
+                                    if inv.points >= 15:
+                                        self.point_confirm_action = ("transform_inventory", item.slot_key)
+                                        self.point_confirm_cost = 15
+                                        self.point_confirm_msg = "Deseja gastar 15 moedas para tentar a Transformacao (Risco de Degradacao)?"
+                                        self.point_confirm_return = "inventory"
+                                        self.point_confirm_selected = 1
+                                        state = "point_confirm"
+                                    else:
+                                        game.message = "Pontos insuficientes para Transformar (custa 15)."
+                                else:
+                                    cost = 7 if item.is_relic else (3 if item.is_hybrid else 1)
+                                    if inv.points >= cost:
+                                        self.point_confirm_action = ("upgrade_inventory", item.slot_key)
+                                        self.point_confirm_cost = cost
+                                        self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para aprimorar este item?"
+                                        self.point_confirm_return = "inventory"
+                                        self.point_confirm_selected = 1
+                                        state = "point_confirm"
+                                    else:
+                                        game.message = f"Pontos insuficientes (custa {cost})."
                             elif self._menu_y_pressed():
-                                game.mark_or_fuse_item(items[inventory_selected].key)
+                                game.mark_or_fuse_item(items[inventory_selected].slot_key)
                                 if game.has_pending_fusion():
                                     state = "fusion_confirm"
                                     fusion_confirm_selected = 1
                             inventory_selected = max(0, min(inventory_selected, len(items) - 1))
+
+                    elif state == "point_confirm":
+                        if self._menu_back_pressed():
+                            state = self.point_confirm_return
+                        elif self._menu_left_pressed() or self._menu_right_pressed() or self._menu_up_pressed() or self._menu_down_pressed():
+                            self.point_confirm_selected = 1 - self.point_confirm_selected
+                        elif self._menu_confirm_pressed():
+                            if self.point_confirm_selected == 0:
+                                state = self._handle_point_confirm_action(self.point_confirm_action, game, self.point_confirm_return)
+                            else:
+                                state = self.point_confirm_return
 
                     elif state == "fusion_confirm":
                         if self._menu_back_pressed():
@@ -652,18 +772,42 @@ class SobrevivenciaGame:
                             state = stat_shop_return_state
                         elif not game.stat_shop_offers:
                             if (self._menu_confirm_pressed() or self._menu_y_pressed()) and game.stat_shop_unlocked():
-                                game.roll_stat_shop()
+                                if game.inventory.points >= STAT_SHOP_ROLL_COST:
+                                    self.point_confirm_action = ("roll_stat_shop",)
+                                    self.point_confirm_cost = STAT_SHOP_ROLL_COST
+                                    self.point_confirm_msg = f"Deseja gastar {STAT_SHOP_ROLL_COST} ponto(s) para abrir a loja?"
+                                    self.point_confirm_return = "stat_shop"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {STAT_SHOP_ROLL_COST})."
                         else:
                             stat_shop_selected = min(stat_shop_selected, len(game.stat_shop_offers) - 1)
-                            if self._menu_left_pressed():
+                            if self._menu_left_pressed() or self._menu_up_pressed():
                                 stat_shop_selected = (stat_shop_selected - 1) % len(game.stat_shop_offers)
-                            elif self._menu_right_pressed():
+                            elif self._menu_right_pressed() or self._menu_down_pressed():
                                 stat_shop_selected = (stat_shop_selected + 1) % len(game.stat_shop_offers)
                             elif self._menu_confirm_pressed():
-                                game.purchase_stat_shop_offer(stat_shop_selected)
-                                stat_shop_selected = min(stat_shop_selected, max(0, len(game.stat_shop_offers) - 1))
+                                cost = game.stat_shop_offers[stat_shop_selected]["cost"]
+                                if game.inventory.points >= cost:
+                                    self.point_confirm_action = ("purchase_stat_shop", stat_shop_selected)
+                                    self.point_confirm_cost = cost
+                                    self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para comprar esta melhoria?"
+                                    self.point_confirm_return = "stat_shop"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {cost})."
                             elif self._menu_x_pressed():
-                                game.reroll_stat_shop_offer(stat_shop_selected)
+                                if game.inventory.points >= STAT_SHOP_REROLL_COST:
+                                    self.point_confirm_action = ("reroll_stat_shop", stat_shop_selected)
+                                    self.point_confirm_cost = STAT_SHOP_REROLL_COST
+                                    self.point_confirm_msg = f"Deseja gastar {STAT_SHOP_REROLL_COST} ponto(s) para trocar esta oferta?"
+                                    self.point_confirm_return = "stat_shop"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {STAT_SHOP_REROLL_COST})."
 
                     elif state == "constructions":
                         entry_count = len(ui.construction_catalog())
@@ -688,7 +832,20 @@ class SobrevivenciaGame:
                                 skill_selected = (skill_selected + 1) % len(keys)
                             elif self._menu_confirm_pressed() or self._menu_x_pressed():
                                 skill_selected = min(skill_selected, len(keys) - 1)
-                                game.upgrade_skill(keys[skill_selected])
+                                key = keys[skill_selected]
+                                cost = game.skill_upgrade_cost(key)
+                                level = game.get_player(game.menu_player_index).passives.get(key, 0)
+                                if level >= 10:
+                                    game.message = "Skill ja esta no nivel maximo."
+                                elif game.get_inventory(game.menu_player_index).points >= cost:
+                                    self.point_confirm_action = ("upgrade_skill", key)
+                                    self.point_confirm_cost = cost
+                                    self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para aprimorar esta skill?"
+                                    self.point_confirm_return = "skills"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {cost})."
 
                     elif state == "game_over":
                         go_options = [("Reiniciar", "restart"), ("Trocar Personagem", "change_character"), ("Voltar ao Menu", "menu"), ("Fechar", "quit")]
@@ -847,21 +1004,25 @@ class SobrevivenciaGame:
                             state = "settings"
                             special_holding[0] = False
                             special_combo_checked[0] = False
+                            combo_holding[0] = False
                         elif self._action_pressed(event, controls, "toggle_weapon"):
                             game.toggle_mode()
                         elif self._action_pressed(event, controls, "dash"):
                             game.try_dash(aim_world)
                         elif self._action_pressed(event, controls, "special"):
-                            special_holding[0] = True
-                            special_hold_time[0] = 0.0
-                            special_hold_triggered[0] = False
-                            special_combo_checked[0] = False
+                            # Especial normal: disparo imediato, sem hold
+                            game.try_special(aim_world, 0)
+                        elif self._action_pressed(event, controls, "combo_special"):
+                            combo_holding[0] = True
+                            combo_hold_time[0] = 0.0
+                            combo_hold_triggered[0] = False
                         elif self._action_pressed(event, controls, "inventory"):
                             state = "inventory"
                             game.menu_player_index = 0
                             inventory_selected = min(inventory_selected, max(0, len(game.get_inventory(0).item_list()) - 1))
                             special_holding[0] = False
                             special_combo_checked[0] = False
+                            combo_holding[0] = False
                         elif self._action_pressed(event, controls, "skills"):
                             skills_return_state = "playing"
                             state = "skills"
@@ -869,12 +1030,14 @@ class SobrevivenciaGame:
                             skill_selected = min(skill_selected, max(0, len(game.get_player(0).passives) - 1))
                             special_holding[0] = False
                             special_combo_checked[0] = False
+                            combo_holding[0] = False
                         elif self._action_pressed(event, controls, "stat_shop"):
                             stat_shop_return_state = "playing"
                             state = "stat_shop"
                             stat_shop_selected = 0
                             special_holding[0] = False
                             special_combo_checked[0] = False
+                            combo_holding[0] = False
 
                     elif state == "paused":
                         if event.key == pygame.K_ESCAPE:
@@ -928,13 +1091,64 @@ class SobrevivenciaGame:
                         if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE) or self._action_pressed(event, controls, "stat_shop"):
                             state = stat_shop_return_state
                         elif event.key == pygame.K_r and game.stat_shop_unlocked() and not game.stat_shop_offers:
-                            game.roll_stat_shop()
-                        elif event.key in (pygame.K_1, pygame.K_KP1) and game.stat_shop_offers:
-                            game.purchase_stat_shop_offer(0)
-                        elif event.key in (pygame.K_2, pygame.K_KP2) and len(game.stat_shop_offers) > 1:
-                            game.purchase_stat_shop_offer(1)
-                        elif event.key in (pygame.K_3, pygame.K_KP3) and len(game.stat_shop_offers) > 2:
-                            game.purchase_stat_shop_offer(2)
+                            if game.inventory.points >= STAT_SHOP_ROLL_COST:
+                                self.point_confirm_action = ("roll_stat_shop",)
+                                self.point_confirm_cost = STAT_SHOP_ROLL_COST
+                                self.point_confirm_msg = f"Deseja gastar {STAT_SHOP_ROLL_COST} ponto(s) para abrir a loja?"
+                                self.point_confirm_return = "stat_shop"
+                                self.point_confirm_selected = 1
+                                state = "point_confirm"
+                            else:
+                                game.message = f"Pontos insuficientes (custa {STAT_SHOP_ROLL_COST})."
+                        elif game.stat_shop_offers:
+                            if event.key in (pygame.K_LEFT, pygame.K_a):
+                                stat_shop_selected = (stat_shop_selected - 1) % len(game.stat_shop_offers)
+                            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                                stat_shop_selected = (stat_shop_selected + 1) % len(game.stat_shop_offers)
+                            elif event.key in (pygame.K_UP, pygame.K_w):
+                                stat_shop_selected = (stat_shop_selected - 1) % len(game.stat_shop_offers)
+                            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                                stat_shop_selected = (stat_shop_selected + 1) % len(game.stat_shop_offers)
+                            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                                idx = stat_shop_selected
+                                cost = game.stat_shop_offers[idx]["cost"]
+                                if game.inventory.points >= cost:
+                                    self.point_confirm_action = ("purchase_stat_shop", idx)
+                                    self.point_confirm_cost = cost
+                                    self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para comprar esta melhoria?"
+                                    self.point_confirm_return = "stat_shop"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {cost})."
+                            elif event.key == pygame.K_x:
+                                idx = stat_shop_selected
+                                if game.inventory.points >= STAT_SHOP_REROLL_COST:
+                                    self.point_confirm_action = ("reroll_stat_shop", idx)
+                                    self.point_confirm_cost = STAT_SHOP_REROLL_COST
+                                    self.point_confirm_msg = f"Deseja gastar {STAT_SHOP_REROLL_COST} ponto(s) para trocar esta oferta?"
+                                    self.point_confirm_return = "stat_shop"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {STAT_SHOP_REROLL_COST})."
+                            else:
+                                idx = None
+                                if event.key in (pygame.K_1, pygame.K_KP1): idx = 0
+                                elif event.key in (pygame.K_2, pygame.K_KP2) and len(game.stat_shop_offers) > 1: idx = 1
+                                elif event.key in (pygame.K_3, pygame.K_KP3) and len(game.stat_shop_offers) > 2: idx = 2
+                                if idx is not None:
+                                    stat_shop_selected = idx
+                                    cost = game.stat_shop_offers[idx]["cost"]
+                                    if game.inventory.points >= cost:
+                                        self.point_confirm_action = ("purchase_stat_shop", idx)
+                                        self.point_confirm_cost = cost
+                                        self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para comprar esta melhoria?"
+                                        self.point_confirm_return = "stat_shop"
+                                        self.point_confirm_selected = 1
+                                        state = "point_confirm"
+                                    else:
+                                        game.message = f"Pontos insuficientes (custa {cost})."
 
                     elif state == "constructions":
                         entry_count = len(ui.construction_catalog())
@@ -970,7 +1184,20 @@ class SobrevivenciaGame:
                             elif event.key == pygame.K_PAGEDOWN:
                                 skill_selected = min(len(keys) - 1, skill_selected + 5)
                             elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE, pygame.K_u):
-                                game.upgrade_skill(keys[skill_selected])
+                                key = keys[skill_selected]
+                                cost = game.skill_upgrade_cost(key)
+                                level = game.get_player(game.menu_player_index).passives.get(key, 0)
+                                if level >= 10:
+                                    game.message = "Skill ja esta no nivel maximo."
+                                elif game.get_inventory(game.menu_player_index).points >= cost:
+                                    self.point_confirm_action = ("upgrade_skill", key)
+                                    self.point_confirm_cost = cost
+                                    self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para aprimorar esta skill?"
+                                    self.point_confirm_return = "skills"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {cost})."
 
                     elif state == "upgrade":
                         if event.key == pygame.K_UP:
@@ -985,15 +1212,40 @@ class SobrevivenciaGame:
                     elif state == "inventory":
                         inv = game.get_inventory(game.menu_player_index)
                         raw_items = inv.item_list()
-                        active_items = [item for item in raw_items if inv.is_active(item.key)]
-                        reserve_items = [item for item in raw_items if not inv.is_active(item.key)]
+                        active_items = [item for item in raw_items if inv.is_active(item.slot_key)]
+                        reserve_items = [item for item in raw_items if not inv.is_active(item.slot_key)]
                         items = active_items + reserve_items
 
-                        if event.key in (pygame.K_ESCAPE, pygame.K_i, pygame.K_TAB):
+                        if event.key in (pygame.K_ESCAPE, pygame.K_i):
                             state = "playing"
+                            inventory_tab = "items"
+                        elif event.key in (pygame.K_TAB, pygame.K_q) and inv.black_market_unlocked:
+                            inventory_tab = "shop" if inventory_tab == "items" else "items"
+                            inventory_selected = 0
                         elif game.multiplayer and event.key == pygame.K_p:
                             game.menu_player_index = 1 - game.menu_player_index
                             inventory_selected = 0
+                        elif inventory_tab == "shop":
+                            shop_keys = list(BASE_ITEM_KEYS)
+                            if event.key == pygame.K_LEFT:
+                                inventory_selected = max(0, inventory_selected - 1)
+                            elif event.key == pygame.K_RIGHT:
+                                inventory_selected = min(len(shop_keys) - 1, inventory_selected + 1)
+                            elif event.key == pygame.K_UP:
+                                inventory_selected = max(0, inventory_selected - 5)
+                            elif event.key == pygame.K_DOWN:
+                                inventory_selected = min(len(shop_keys) - 1, inventory_selected + 5)
+                            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_e, pygame.K_u):
+                                cost = 15
+                                if inv.points >= cost:
+                                    self.point_confirm_action = ("buy_shop_item", shop_keys[inventory_selected])
+                                    self.point_confirm_cost = cost
+                                    self.point_confirm_msg = f"Deseja gastar {cost} moedas para comprar este item?"
+                                    self.point_confirm_return = "inventory"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {cost})."
                         elif items:
                             if event.key == pygame.K_UP:
                                 inventory_selected -= 5
@@ -1004,14 +1256,47 @@ class SobrevivenciaGame:
                             elif event.key == pygame.K_RIGHT:
                                 inventory_selected += 1
                             elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_e):
-                                game.toggle_inventory_item(items[inventory_selected].key)
+                                game.toggle_inventory_item(items[inventory_selected].slot_key)
                             elif event.key == pygame.K_u:
-                                game.upgrade_inventory_item(items[inventory_selected].key)
+                                item = items[inventory_selected]
+                                if item.rank == 1 and item.level >= 10 and inv.black_market_unlocked:
+                                    cost = 15
+                                    if inv.points >= cost:
+                                        self.point_confirm_action = ("transform_inventory", item.slot_key)
+                                        self.point_confirm_cost = cost
+                                        self.point_confirm_msg = "Deseja gastar 15 moedas para tentar a Transformacao (Risco de Degradacao)?"
+                                        self.point_confirm_return = "inventory"
+                                        self.point_confirm_selected = 1
+                                        state = "point_confirm"
+                                    else:
+                                        game.message = "Pontos insuficientes para Transformar (custa 15)."
+                                else:
+                                    cost = 7 if item.is_relic else (3 if item.is_hybrid else 1)
+                                    if inv.points >= cost:
+                                        self.point_confirm_action = ("upgrade_inventory", item.slot_key)
+                                        self.point_confirm_cost = cost
+                                        self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para aprimorar este item?"
+                                        self.point_confirm_return = "inventory"
+                                        self.point_confirm_selected = 1
+                                        state = "point_confirm"
+                                    else:
+                                        game.message = f"Pontos insuficientes (custa {cost})."
                             elif event.key == pygame.K_f:
-                                game.mark_or_fuse_item(items[inventory_selected].key)
+                                game.mark_or_fuse_item(items[inventory_selected].slot_key)
                                 if game.has_pending_fusion():
                                     state = "fusion_confirm"
                                     fusion_confirm_selected = 1
+                            elif event.key == pygame.K_s:
+                                if not inv.is_active(items[inventory_selected].slot_key):
+                                    value = inv.get_sell_value(items[inventory_selected].slot_key)
+                                    self.point_confirm_action = ("sell_inventory", items[inventory_selected].slot_key)
+                                    self.point_confirm_cost = 0
+                                    self.point_confirm_msg = f"Deseja vender este item por {value} ponto(s)?"
+                                    self.point_confirm_return = "inventory"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = "Desequipe o item antes de vende-lo."
 
                             inventory_selected = max(0, min(inventory_selected, len(items) - 1))
 
@@ -1025,6 +1310,19 @@ class SobrevivenciaGame:
                         elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                             action = "fusion_confirm_yes" if fusion_confirm_selected == 0 else "fusion_confirm_no"
                             state, inventory_selected = self._handle_fusion_confirm_action(action, game, inventory_selected)
+
+                    elif state == "point_confirm":
+                        if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE, pygame.K_n):
+                            state = self.point_confirm_return
+                        elif event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN):
+                            self.point_confirm_selected = 1 - self.point_confirm_selected
+                        elif event.key in (pygame.K_y,):
+                            state = self._handle_point_confirm_action(self.point_confirm_action, game, self.point_confirm_return)
+                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                            if self.point_confirm_selected == 0:
+                                state = self._handle_point_confirm_action(self.point_confirm_action, game, self.point_confirm_return)
+                            else:
+                                state = self.point_confirm_return
 
                     elif state == "game_over":
                         if event.key == pygame.K_r:
@@ -1042,21 +1340,19 @@ class SobrevivenciaGame:
                             return_action = "menu"
 
             if state == "playing":
-                if special_holding[0]:
-                    if not self._action_currently_active(controls, "special"):
-                        if not special_hold_triggered[0]:
-                            game.try_special(aim_world, 0)
-                        special_holding[0] = False
-                        special_hold_time[0] = 0.0
-                        special_hold_triggered[0] = False
-                        special_combo_checked[0] = False
+                # Combo Suprema: hold dedicado em combo_special
+                if combo_holding[0]:
+                    if not self._action_currently_active(controls, "combo_special"):
+                        # Botão solto sem atingir o tempo: ignora (não dispara nada)
+                        combo_holding[0] = False
+                        combo_hold_time[0] = 0.0
+                        combo_hold_triggered[0] = False
                     else:
-                        special_hold_time[0] += dt
-                        if not special_combo_checked[0] and special_hold_time[0] >= SPECIAL_COMBO_HOLD_SECONDS:
-                            special_combo_checked[0] = True
-                            if game.try_combo_special(aim_world, 0):
-                                special_hold_triggered[0] = True
-                                special_holding[0] = False
+                        combo_hold_time[0] += dt
+                        if not combo_hold_triggered[0] and combo_hold_time[0] >= SPECIAL_COMBO_HOLD_SECONDS:
+                            combo_hold_triggered[0] = True
+                            game.try_combo_special(aim_world, 0)
+                            combo_holding[0] = False
                 p1_controls = self._player_one_controls(controls) if game.multiplayer else controls
                 move = self._movement_vector(p1_controls)
                 move_2 = self._joystick_movement_vector() if game.multiplayer else None
@@ -1101,7 +1397,7 @@ class SobrevivenciaGame:
                     mouse_pos,
                 )
             elif state == "stat_shop":
-                button_rects = ui.render_stat_shop(game, mouse_pos)
+                button_rects = ui.render_stat_shop(game, stat_shop_selected, mouse_pos)
             elif state == "constructions":
                 construction_selected = min(construction_selected, max(0, len(ui.construction_catalog()) - 1))
                 button_rects = ui.render_constructions(game, construction_selected, mouse_pos)
@@ -1111,11 +1407,23 @@ class SobrevivenciaGame:
             elif state == "upgrade":
                 button_rects = ui.render_upgrade(game, upgrade_selected, mouse_pos)
             elif state == "inventory":
-                inventory_selected = min(inventory_selected, max(0, len(game.get_inventory(game.menu_player_index).item_list()) - 1))
-                button_rects = ui.render_inventory(game, inventory_selected, mouse_pos)
+                inv = game.get_inventory(game.menu_player_index)
+                if inventory_tab == "shop":
+                    inventory_selected = min(inventory_selected, max(0, len(list(BASE_ITEM_KEYS)) - 1))
+                else:
+                    inventory_selected = min(inventory_selected, max(0, len(inv.item_list()) - 1))
+                button_rects = ui.render_inventory(game, inventory_selected, mouse_pos, inventory_tab)
             elif state == "fusion_confirm":
                 inventory_selected = min(inventory_selected, max(0, len(game.get_inventory(game.menu_player_index).item_list()) - 1))
                 button_rects = ui.render_fusion_confirm(game, inventory_selected, fusion_confirm_selected, mouse_pos)
+            elif state == "point_confirm":
+                if self.point_confirm_return == "stat_shop":
+                    ui.render_stat_shop(game, stat_shop_selected, mouse_pos)
+                elif self.point_confirm_return == "skills":
+                    ui.render_skills(game, skill_selected, mouse_pos)
+                elif self.point_confirm_return == "inventory":
+                    ui.render_inventory(game, inventory_selected, mouse_pos, inventory_tab)
+                button_rects = ui.render_point_confirm(game, self.point_confirm_cost, self.point_confirm_msg, self.point_confirm_selected, mouse_pos)
             elif state == "game_over":
                 button_rects = ui.render_game_over(game, mouse_pos, game_over_selected)
 
@@ -1298,7 +1606,16 @@ class SobrevivenciaGame:
         return self._pressed_has(("joy_button", 2), ("key", pygame.K_x), ("key", pygame.K_u))
 
     def _menu_y_pressed(self):
-        return self._pressed_has(("joy_button", 3), ("key", pygame.K_y), ("key", pygame.K_TAB))
+        return self._pressed_has(("joy_button", 3), ("key", pygame.K_y))
+
+    def _menu_l1_pressed(self):
+        return self._pressed_has(("joy_button", 4), ("key", pygame.K_q))
+        
+    def _menu_r1_pressed(self):
+        return self._pressed_has(("joy_button", 5), ("key", pygame.K_e))
+        
+    def _menu_l3_pressed(self):
+        return self._pressed_has(("joy_button", 8), ("key", pygame.K_p))
 
     def _joystick_aim_vector(self):
         best = Vector2()
@@ -1372,12 +1689,37 @@ class SobrevivenciaGame:
                     screen = pygame.display.set_mode((0, 0), flags)
                 else:
                     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
-                ui.screen = screen
                 return screen, applied_fullscreen
             except pygame.error:
                 continue
 
-        return ui.screen, False
+        return pygame.display.get_surface(), False
+
+    def _handle_point_confirm_action(self, action, game, return_state):
+        if not action:
+            return return_state
+        act = action[0]
+        if act == "roll_stat_shop":
+            game.roll_stat_shop()
+        elif act == "purchase_stat_shop":
+            game.purchase_stat_shop_offer(action[1])
+        elif act == "reroll_stat_shop":
+            game.reroll_stat_shop_offer(action[1])
+        elif act == "upgrade_skill":
+            game.upgrade_skill(action[1])
+        elif act == "upgrade_inventory":
+            game.upgrade_inventory_item(action[1])
+        elif act == "buy_shop_item":
+            game.buy_shop_item(action[1])
+        elif act == "transform_inventory":
+            inv = game.get_inventory(game.menu_player_index)
+            success, msg = inv.attempt_transformation(action[1], game.random)
+            game.message = msg
+        elif act == "sell_inventory":
+            inv = game.get_inventory(game.menu_player_index)
+            success, msg = inv.sell_item(action[1])
+            game.message = msg
+        return return_state
 
     def _binding_from_event(self, event):
         if event.type in (pygame.KEYDOWN, pygame.KEYUP):
@@ -1553,7 +1895,8 @@ class SobrevivenciaGame:
             "Mouse: direcao dos tiros e golpes automaticos",
             f"{self._binding_combo(controls, 'toggle_weapon')}: alternar entre projetil e espada",
             f"{self._binding_combo(controls, 'dash')}: dash com recarga e invulnerabilidade curta",
-            f"{self._binding_combo(controls, 'special')}: especial; segure para combo com as duas barras cheias",
+            f"{self._binding_combo(controls, 'special')}: especial normal (toque)",
+            f"{self._binding_combo(controls, 'combo_special')}: Suprema - segure com as duas barras cheias",
             f"{self._binding_combo(controls, 'inventory')}: abre inventario de itens passivos",
             f"{self._binding_combo(controls, 'skills')}: abre Gerenciamento de Skills",
             f"{self._binding_combo(controls, 'stat_shop')}: abre Loja de Status",
@@ -1667,26 +2010,73 @@ class SobrevivenciaGame:
         if action == "item_toggle":
             game.toggle_inventory_item(key)
         elif action == "item_upgrade":
-            game.upgrade_inventory_item(key)
+            cost = 7 if items[selected].is_relic else (3 if items[selected].is_hybrid else 1)
+            if inv.points >= cost:
+                self.point_confirm_action = ("upgrade_inventory", key)
+                self.point_confirm_cost = cost
+                self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para aprimorar este item?"
+                self.point_confirm_return = "inventory"
+                self.point_confirm_selected = 1
+                return "point_confirm", selected
+            else:
+                game.message = f"Pontos insuficientes (custa {cost})."
         elif action == "item_fuse":
             game.mark_or_fuse_item(key)
             if game.has_pending_fusion():
                 return "fusion_confirm", selected
             selected = min(selected, max(0, len(inv.item_list()) - 1))
+        elif action == "item_sell":
+            if not inv.is_active(items[selected].slot_key):
+                value = inv.get_sell_value(items[selected].slot_key)
+                self.point_confirm_action = ("sell_inventory", items[selected].slot_key)
+                self.point_confirm_cost = 0 # No cost, we gain points
+                self.point_confirm_msg = f"Deseja vender este item por {value} ponto(s)?"
+                self.point_confirm_return = "inventory"
+                self.point_confirm_selected = 1
+                return "point_confirm", selected
+            else:
+                game.message = "Desequipe o item antes de vende-lo."
         return state, selected
 
     def _handle_stat_shop_action(self, action, game, return_state):
         if action == "stat_shop_back":
             return return_state
         if action == "stat_shop_roll":
-            game.roll_stat_shop()
-            return "stat_shop"
+            if game.inventory.points >= STAT_SHOP_ROLL_COST:
+                self.point_confirm_action = ("roll_stat_shop",)
+                self.point_confirm_cost = STAT_SHOP_ROLL_COST
+                self.point_confirm_msg = f"Deseja gastar {STAT_SHOP_ROLL_COST} ponto(s) para abrir a loja?"
+                self.point_confirm_return = "stat_shop"
+                self.point_confirm_selected = 1
+                return "point_confirm"
+            else:
+                game.message = f"Pontos insuficientes (custa {STAT_SHOP_ROLL_COST})."
+                return "stat_shop"
         if action.startswith("stat_shop_buy:"):
-            game.purchase_stat_shop_offer(int(action.split(":", 1)[1]))
-            return "stat_shop"
+            idx = int(action.split(":", 1)[1])
+            cost = game.stat_shop_offers[idx]["cost"]
+            if game.inventory.points >= cost:
+                self.point_confirm_action = ("purchase_stat_shop", idx)
+                self.point_confirm_cost = cost
+                self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para comprar esta melhoria?"
+                self.point_confirm_return = "stat_shop"
+                self.point_confirm_selected = 1
+                return "point_confirm"
+            else:
+                game.message = f"Pontos insuficientes (custa {cost})."
+                return "stat_shop"
         if action.startswith("stat_shop_reroll:"):
-            game.reroll_stat_shop_offer(int(action.split(":", 1)[1]))
-            return "stat_shop"
+            idx = int(action.split(":", 1)[1])
+            if game.inventory.points >= STAT_SHOP_REROLL_COST:
+                self.point_confirm_action = ("reroll_stat_shop", idx)
+                self.point_confirm_cost = STAT_SHOP_REROLL_COST
+                self.point_confirm_msg = f"Deseja gastar {STAT_SHOP_REROLL_COST} ponto(s) para trocar esta oferta?"
+                self.point_confirm_return = "stat_shop"
+                self.point_confirm_selected = 1
+                return "point_confirm"
+            else:
+                game.message = f"Pontos insuficientes (custa {STAT_SHOP_REROLL_COST})."
+                return "stat_shop"
         return "stat_shop"
 
     def _handle_construction_action(self, action, selected):
@@ -1704,7 +2094,20 @@ class SobrevivenciaGame:
             return state, int(action.split(":", 1)[1])
         if action == "skill_upgrade" and keys:
             selected = min(selected, len(keys) - 1)
-            game.upgrade_skill(keys[selected])
+            key = keys[selected]
+            cost = game.skill_upgrade_cost(key)
+            level = game.get_player(game.menu_player_index).passives.get(key, 0)
+            if level >= 10:
+                game.message = "Skill ja esta no nivel maximo."
+            elif game.get_inventory(game.menu_player_index).points >= cost:
+                self.point_confirm_action = ("upgrade_skill", key)
+                self.point_confirm_cost = cost
+                self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para aprimorar esta skill?"
+                self.point_confirm_return = "skills"
+                self.point_confirm_selected = 1
+                return "point_confirm", selected
+            else:
+                game.message = f"Pontos insuficientes (custa {cost})."
         return state, selected
 
     def _handle_fusion_confirm_action(self, action, game, selected):

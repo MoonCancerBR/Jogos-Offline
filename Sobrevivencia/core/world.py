@@ -318,8 +318,8 @@ class World:
         ]
         return min(distances, key=lambda entry: entry[0])[1]
 
-    def circle_hits_wall(self, pos, radius):
-        return any(circle_rect_overlap(pos.x, pos.y, radius, rect) for rect in self.nearby_solid_rects(pos.x, pos.y, radius))
+    def circle_hits_wall(self, pos, radius, include_destructibles=True):
+        return any(circle_rect_overlap(pos.x, pos.y, radius, rect) for rect in self.nearby_solid_rects(pos.x, pos.y, radius, include_destructibles))
 
     def remove_destructible(self, item):
         chunk = self.ensure_chunk(*item.chunk)
