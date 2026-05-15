@@ -1,4 +1,5 @@
 import math
+import pygame
 
 
 SCREEN_WIDTH = 1100
@@ -58,6 +59,81 @@ STAT_SHOP_UNLOCK_LEVEL = 20
 STAT_SHOP_ROLL_COST = 1
 STAT_SHOP_REROLL_COST = 1
 FUSION_COST = 3
+
+STAT_SHOP_STATS = [
+    {
+        "key": "max_health",
+        "label": "Vida maxima",
+        "base": 10.0,
+        "cost": 0.22,
+        "kind": "flat",
+        "unit": "vida",
+    },
+    {
+        "key": "damage",
+        "label": "Dano",
+        "base": 0.035,
+        "cost": 75.0,
+        "kind": "percent",
+        "unit": "dano",
+    },
+    {
+        "key": "speed",
+        "label": "Velocidade",
+        "base": 0.030,
+        "cost": 68.0,
+        "kind": "percent",
+        "unit": "velocidade",
+    },
+    {
+        "key": "attack_rate",
+        "label": "Cadencia",
+        "base": 0.032,
+        "cost": 70.0,
+        "kind": "percent",
+        "unit": "cadencia",
+    },
+    {
+        "key": "sword_range",
+        "label": "Alcance corpo a corpo",
+        "base": 0.045,
+        "cost": 52.0,
+        "kind": "percent",
+        "unit": "alcance",
+    },
+    {
+        "key": "special_gain",
+        "label": "Carga de especial",
+        "base": 0.050,
+        "cost": 46.0,
+        "kind": "percent",
+        "unit": "carga",
+    },
+    {
+        "key": "vampirism",
+        "label": "Vampirismo",
+        "base": 0.8,
+        "cost": 1.35,
+        "kind": "decimal",
+        "unit": "cura/abate",
+    },
+    {
+        "key": "magazine",
+        "label": "Pente",
+        "base": 3.0,
+        "cost": 0.82,
+        "kind": "integer",
+        "unit": "municoes",
+    },
+    {
+        "key": "reload_speed",
+        "label": "Recarga",
+        "base": 0.030,
+        "cost": 74.0,
+        "kind": "percent",
+        "unit": "recarga",
+    },
+]
 
 XP_MAGNET_RADIUS = 150
 DROP_PICKUP_RADIUS = 32
@@ -533,3 +609,87 @@ RELIC_DEFINITIONS = {
         "description": "Raios, magnetismo, defesa e crono. O tempo e seu.",
     },
 }
+
+PAUSE_OPTIONS = [
+    ("Continuar", "resume"),
+    ("Inventario", "inventory"),
+    ("Gerenciamento de Skills", "skills"),
+    ("Loja de Status", "stat_shop"),
+    ("Construcoes", "constructions"),
+    ("Comandos", "commands"),
+    ("Configuracoes", "settings"),
+    ("Trocar Personagem", "change_character"),
+    ("Reiniciar", "restart"),
+    ("Voltar ao Menu", "menu"),
+    ("Fechar", "quit"),
+]
+
+
+START_OPTIONS = [
+    ("Iniciar Jogo", "character_select"),
+    ("Comandos", "commands"),
+    ("Configuracoes", "settings"),
+    ("Voltar ao Menu", "menu"),
+]
+
+
+CONTROL_ACTIONS = [
+    ("move_up", "Mover para cima"),
+    ("move_down", "Mover para baixo"),
+    ("move_left", "Mover para esquerda"),
+    ("move_right", "Mover para direita"),
+    ("dash", "Dash"),
+    ("special", "Especial"),
+    ("combo_special", "Suprema (segure)"),
+    ("toggle_weapon", "Alternar arma"),
+    ("inventory", "Inventario"),
+    ("skills", "Skills"),
+    ("stat_shop", "Loja de Status"),
+    ("pause", "Pausar"),
+    ("settings", "Configuracoes"),
+    ("fullscreen", "Tela cheia"),
+]
+
+
+BINDING_SLOT_COUNT = 3
+
+
+DEFAULT_BINDINGS = {
+    "move_up": [("key", pygame.K_w), ("key", pygame.K_UP), None],
+    "move_down": [("key", pygame.K_s), ("key", pygame.K_DOWN), None],
+    "move_left": [("key", pygame.K_a), ("key", pygame.K_LEFT), None],
+    "move_right": [("key", pygame.K_d), ("key", pygame.K_RIGHT), None],
+    "dash": [("key", pygame.K_SPACE), None, None],
+    "special": [("key", pygame.K_e), None, None],
+    "combo_special": [("key", pygame.K_r), None, None],
+    "toggle_weapon": [("key", pygame.K_q), ("key", pygame.K_LSHIFT), None],
+    "inventory": [("key", pygame.K_i), ("key", pygame.K_TAB), None],
+    "skills": [("key", pygame.K_k), None, None],
+    "stat_shop": [("key", pygame.K_l), None, None],
+    "pause": [("key", pygame.K_ESCAPE), None, None],
+    "settings": [("key", pygame.K_o), None, None],
+    "fullscreen": [("key", pygame.K_F11), None, None],
+}
+
+
+JOYSTICK_DEFAULT_BINDINGS = {
+    "move_up": ("joy_axis", 1, -1),
+    "move_down": ("joy_axis", 1, 1),
+    "move_left": ("joy_axis", 0, -1),
+    "move_right": ("joy_axis", 0, 1),
+    "dash": ("joy_button", 0),
+    "special": ("joy_button", 2),
+    "combo_special": ("joy_button", 3),
+    "toggle_weapon": ("joy_button", 1),
+    "inventory": ("joy_button", 6),
+    "skills": ("joy_button", 5),
+    "stat_shop": ("joy_button", 4),
+    "pause": ("joy_button", 7),
+}
+
+
+JOYSTICK_DEADZONE = 0.55
+JOYSTICK_AIM_DEADZONE = 0.28
+JOYSTICK_AIM_DISTANCE = 230
+
+
