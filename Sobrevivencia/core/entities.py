@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from pygame.math import Vector2
 
 if __package__:
-    from .constants import (
+    from ..data.constants import (
         BUFF_DURATION,
         BASE_MAGAZINE_CAPACITY,
         PLAYER_BASE_SPEED,
@@ -22,7 +22,7 @@ if __package__:
         CHARACTERS,
     )
 else:
-    from constants import (
+    from Sobrevivencia.data.constants import (
         BUFF_DURATION,
         BASE_MAGAZINE_CAPACITY,
         PLAYER_BASE_SPEED,
@@ -100,6 +100,8 @@ class Player:
     ammo_reserve: int = STARTING_AMMO_RESERVE
     reload_timer: float = 0
     reload_duration: float = 0
+    reload_step_timer: float = 0
+    full_ammo_msg_timer: float = 0
     forced_reload: bool = False
     shoot_timer: float = 0
     sword_timer: float = 0

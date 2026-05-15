@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 if __package__:
     from .constants import RELIC_DEFINITIONS
 else:
-    from constants import RELIC_DEFINITIONS
+    from Sobrevivencia.data.constants import RELIC_DEFINITIONS
 
 
 MAX_ITEM_LEVEL = 10

@@ -4,15 +4,15 @@ import random
 from pygame.math import Vector2
 
 if __package__:
-    from .constants import *
+    from ..data.constants import *
     from .entities import Drop, Enemy, Player, Projectile, Slash
-    from .items import Inventory, item_display_name, RELIC_DEFINITIONS
+    from ..data.items import Inventory, item_display_name, RELIC_DEFINITIONS
     from .world import World, circle_rect_overlap
 else:
-    from constants import *
-    from entities import Drop, Enemy, Player, Projectile, Slash
-    from items import Inventory, item_display_name, RELIC_DEFINITIONS
-    from world import World, circle_rect_overlap
+    from Sobrevivencia.data.constants import *
+    from Sobrevivencia.core.entities import Drop, Enemy, Player, Projectile, Slash
+    from Sobrevivencia.data.items import Inventory, item_display_name, RELIC_DEFINITIONS
+    from Sobrevivencia.core.world import World, circle_rect_overlap
 
 
 STAT_SHOP_STATS = [
@@ -106,12 +106,20 @@ class GameLogic:
             self.players = [self.player, self.player2]
             self.inventories = [self.inventory, self.inventory2]
             self.shared_coins = 0
+            # XP Compartilhado
+            self.shared_level = 1
+            self.shared_xp = 0
+            self.shared_xp_to_next = int(40 + 25 * 1)
+            self.draft_active = False
+            self.draft_turn_player = 0  # 0 ou 1
+            self.draft_first_picker = 0 # Alterna a cada nível
         else:
             self.player2 = None
             self.inventory2 = None
             self.players = [self.player]
             self.inventories = [self.inventory]
             self.shared_coins = 0
+            self.shared_level = 1 # Para compatibilidade
         self.camera = Vector2(
             self.player.pos.x - SCREEN_WIDTH * 0.5,
             self.player.pos.y - SCREEN_HEIGHT * 0.5,
@@ -154,6 +162,7 @@ class GameLogic:
         self.director_speed = 1.0
         # Relic aura
         self.relic_aura_angle = 0.0
+        self.camera_zoom = 1.0
 
     def restart(self):
         self.__init__(self.char_class, self.char_class_2, self.multiplayer)
@@ -170,12 +179,21 @@ class GameLogic:
 
     @property
     def camera_focus(self):
+        if self.multiplayer and self.player2:
+            alive = self.alive_players()
+            if len(alive) == 2:
+                # Ponto médio
+                return (alive[0].pos + alive[1].pos) * 0.5
+            elif len(alive) == 1:
+                return alive[0].pos
+            return self.players[0].pos
+        
         p = self.get_player(self.camera_focus_index)
         if p.is_down and self.multiplayer:
             other = self.get_player(1 - self.camera_focus_index)
             if not other.is_down:
-                return other
-        return p
+                return other.pos
+        return p.pos
 
     def alive_players(self):
         return [p for p in self.players if not p.is_down]
@@ -184,12 +202,18 @@ class GameLogic:
         player = self.get_player(player_index)
         if player.is_down:
             return
-        if player.mode == "weapon_2":
+        
+        if player.mode == "weapon_1": # Mudando para weapon_2 (espada)
+            player.mode = "weapon_2"
+            player.forced_reload = False
+            if player.ammo_magazine < self.magazine_capacity_for(player) and player.reload_timer <= 0:
+                self._start_reload_for(player, forced=False, show_message=False)
+        else:
             if not self._ranged_weapon_ready_for(player, show_message=True):
                 return
             player.mode = "weapon_1"
-        else:
-            player.mode = "weapon_2"
+            player.forced_reload = False
+        
         w_name = CHARACTERS[player.char_class][player.mode]
         self.message = f"J{player_index + 1}: modo {w_name}"
 
@@ -419,7 +443,7 @@ class GameLogic:
             return False
         if player.ammo_magazine > 0:
             return True
-        started = self._start_forced_reload_for(player)
+        started = self._start_reload_for(player)
         if show_message and not started:
             self.message = f"J{player.player_index + 1} sem municao: lute corpo a corpo e colete cartuchos."
         elif show_message:
@@ -640,10 +664,32 @@ class GameLogic:
         player.dash_timer = max(0, player.dash_timer - dt)
         player.invulnerable_timer = max(0, player.invulnerable_timer - dt)
         player.shield_timer = max(0, player.shield_timer - dt)
-        if player.reload_timer > 0:
+        player.full_ammo_msg_timer = max(0, player.full_ammo_msg_timer - dt)
+        if player.mode == "weapon_2" and player.ammo_magazine < self.magazine_capacity_for(player) and player.ammo_reserve > 0:
             player.reload_timer = max(0, player.reload_timer - dt)
-            if player.reload_timer <= 0:
-                self._finish_reload_for(player)
+            player.reload_step_timer -= dt
+            
+            if player.reload_step_timer <= 0:
+                player.ammo_reserve -= 1
+                player.ammo_magazine += 1
+                
+                capacity = self.magazine_capacity_for(player)
+                if player.ammo_magazine < capacity and player.ammo_reserve > 0:
+                    time_per_bullet = player.reload_duration / capacity
+                    player.reload_step_timer += time_per_bullet
+                else:
+                    player.reload_timer = 0
+                    player.reload_step_timer = 0
+                    if player.forced_reload:
+                        player.mode = "weapon_1"
+                        player.forced_reload = False
+                        
+                        w_name = CHARACTERS[player.char_class][player.mode]
+                        self.message = f"J{player.player_index + 1}: modo {w_name}"
+        else:
+            if player.reload_timer > 0:
+                player.reload_timer = 0
+                player.reload_step_timer = 0
 
         expired = []
         for name in player.buffs:
@@ -832,65 +878,78 @@ class GameLogic:
         level_capacity = BASE_MAGAZINE_CAPACITY + max(0, player.level - 1) * MAGAZINE_CAPACITY_PER_LEVEL
         return level_capacity + player.magazine_bonus
 
+    def max_ammo_reserve_for(self, player):
+        return STARTING_AMMO_RESERVE + max(0, player.level - 1) * 20
+
     def _consume_ranged_ammo_for(self, player):
         if player.reload_timer > 0:
             return False
         if player.ammo_magazine > 0:
             player.ammo_magazine = max(0, player.ammo_magazine - 1)
             if player.ammo_magazine <= 0:
-                self._start_forced_reload_for(player)
+                self._start_reload_for(player)
             return True
-        self._start_forced_reload_for(player)
+        self._start_reload_for(player)
         return False
 
-    def _start_forced_reload_for(self, player):
+    def _start_reload_for(self, player, forced=True, show_message=True):
         player.mode = "weapon_2"
-        player.forced_reload = True
-        if player.ammo_reserve <= 0:
+        if forced:
+            player.forced_reload = True
+        
+        capacity = self.magazine_capacity_for(player)
+        if player.ammo_magazine >= capacity or player.ammo_reserve <= 0:
+            if forced and show_message:
+                self.message = f"J{player.player_index + 1} sem municao: lute corpo a corpo e colete cartuchos."
             return False
-        inv = self.get_inventory(player.player_index)
+
         reload_bonus = (
             player.passives.get("combat_drill", 0) * 0.015
             + player.passives.get("predator_focus", 0) * 0.015
             + player.reload_speed_bonus
         )
         player.reload_duration = max(0.75, RELOAD_DURATION * (1.0 - min(0.35, reload_bonus)))
-        player.reload_timer = player.reload_duration
+        
+        needed = capacity - player.ammo_magazine
+        loaded = min(needed, player.ammo_reserve)
+        time_per_bullet = player.reload_duration / capacity
+        
+        player.reload_timer = time_per_bullet * loaded
+        player.reload_step_timer = time_per_bullet
+        
+        if forced and show_message:
+            self.message = f"J{player.player_index + 1}: pente vazio: arma corpo a corpo ativa enquanto recarrega."
         return True
 
-    def _finish_reload_for(self, player):
-        capacity = self.magazine_capacity_for(player)
-        needed = max(0, capacity - player.ammo_magazine)
-        loaded = min(needed, player.ammo_reserve)
-        if loaded <= 0:
-            player.reload_timer = 0
-            player.reload_duration = 0
-            player.forced_reload = True
-            return
-        player.ammo_magazine += loaded
-        player.ammo_reserve -= loaded
-        player.reload_timer = 0
-        player.reload_duration = 0
-        was_forced = player.forced_reload
-        player.forced_reload = False
-        if was_forced:
-            player.mode = "weapon_1"
+
 
     # ------------------------------------------------------------------ #
     # MULTIPLAYER: TETHERING & REVIVE                                      #
     # ------------------------------------------------------------------ #
 
     def _update_tethering(self):
-        focus = self.camera_focus
-        for player in self.players:
-            if player is focus or player.is_down:
-                continue
-            distance = player.pos.distance_to(focus.pos)
-            if distance > TETHER_MAX_DISTANCE:
-                direction = (focus.pos - player.pos).normalize()
-                safe_pos = focus.pos - direction * (TETHER_MAX_DISTANCE - TETHER_TELEPORT_MARGIN)
-                player.pos = self.world.move_circle(safe_pos, player.radius, Vector2(0, 0))
-                self.add_floater(player.pos, "Teletransporte!", COLORS["special"])
+        if not self.multiplayer or not self.player2:
+            return
+        
+        alive = self.alive_players()
+        if len(alive) < 2:
+            return
+
+        p1, p2 = alive[0], alive[1]
+        dist = p1.pos.distance_to(p2.pos)
+        if dist > TETHER_MAX_DISTANCE:
+            # Teleporta ambos para ficarem no limite permitido em relação ao ponto médio
+            mid = (p1.pos + p2.pos) * 0.5
+            diff = (p1.pos - p2.pos).normalize()
+            limit = TETHER_MAX_DISTANCE * 0.48
+            p1.pos = mid + diff * limit
+            p2.pos = mid - diff * limit
+            
+            # Garante que não atravessam paredes no teleporte
+            p1.pos = self.world.move_circle(p1.pos, p1.radius, Vector2(0, 0))
+            p2.pos = self.world.move_circle(p2.pos, p2.radius, Vector2(0, 0))
+            
+            self.add_floater(mid, "Fiquem Juntos!", COLORS["special"])
 
     def _update_revive(self, dt):
         alive = [p for p in self.players if not p.is_down]
@@ -997,7 +1056,7 @@ class GameLogic:
             kind = "sapper"
         elif self.time_alive > 150 and roll < 0.22:
             kind = "bulwark"
-        elif self.time_alive > 95 and roll < 0.34:
+        elif self.time_alive > 95 and roll < 0.29: # Reduzido de 0.34 (12% -> 7%)
             kind = "spitter"
         elif self.time_alive > 75 and roll < 0.48:
             kind = "brute"
@@ -1335,15 +1394,19 @@ class GameLogic:
         enemy.special_timer -= dt
         offset = enemy.pos - target.pos
         distance = offset.length() if offset.length_squared() > 0 else 1.0
-        if enemy.special_timer <= 0 and 260 < distance < 690:
+        
+        # Menor frequência de disparos
+        if enemy.special_timer <= 0 and 280 < distance < 650:
             self._start_spitter_shot(enemy)
             return Vector2(0, 0)
 
         away = offset.normalize() if offset.length_squared() > 0 else Vector2(1, 0)
         tangent = away.rotate(90 if math.sin(enemy.phase * 2.0 + enemy.id) > 0 else -90)
-        if distance < 340:
-            desired = away * 1.25 + tangent * 0.35
-        elif distance > 590:
+        
+        # Ajuste de distâncias de fuga e perseguição
+        if distance < 380: # Aumentado de 340
+            desired = away * 1.1 + tangent * 0.3 # Velocidade de fuga levemente reduzida
+        elif distance > 550: # Reduzido de 590
             desired = -away + tangent * 0.25
         else:
             desired = tangent * 0.65
@@ -1611,8 +1674,8 @@ class GameLogic:
                 enemy.knockback += direction * 180 * dt
 
     def _update_hazards(self, dt):
-        focus = self.camera_focus
-        for hazard in list(self.world.nearby_hazards(focus.pos.x, focus.pos.y, 980)):
+        focus = self.camera_focus  # já é um Vector2
+        for hazard in list(self.world.nearby_hazards(focus.x, focus.y, 980)):
             hazard.pulse += dt
             if hazard.kind == "mine":
                 trigger_pos = None
@@ -1737,8 +1800,8 @@ class GameLogic:
                 drop.pos += to_player.normalize() * DROP_ATTRACT_SPEED * dt
 
             if distance <= DROP_PICKUP_RADIUS + drop.radius:
-                self.collect_drop(drop, nearest)
-                continue
+                if self.collect_drop(drop, nearest):
+                    continue
             if drop.ttl > 0:
                 alive.append(drop)
         self.drops = alive
@@ -1753,11 +1816,27 @@ class GameLogic:
         self.floaters = alive[-35:]
 
     def _update_camera(self, dt):
-        focus = self.camera_focus
+        focus_pos = self.camera_focus
         target = Vector2(
-            focus.pos.x - SCREEN_WIDTH * 0.5,
-            focus.pos.y - SCREEN_HEIGHT * 0.5,
+            focus_pos.x - SCREEN_WIDTH * 0.5,
+            focus_pos.y - SCREEN_HEIGHT * 0.5,
         )
+        
+        # Zoom dinâmico no multiplayer
+        if self.multiplayer and self.player2:
+            alive = self.alive_players()
+            if len(alive) == 2:
+                dist = alive[0].pos.distance_to(alive[1].pos)
+                scale = 1.0
+                if dist > 300:
+                    t = min(1.0, (dist - 300) / (CAMERA_ZOOM_MAX_DISTANCE - 300))
+                    scale = 1.0 - t * (1.0 - CAMERA_ZOOM_MIN_SCALE)
+                self.camera_zoom += (scale - self.camera_zoom) * dt * 2.0
+            else:
+                self.camera_zoom += (1.0 - self.camera_zoom) * dt * 2.0
+        else:
+            self.camera_zoom = 1.0
+
         self.camera += (target - self.camera) * min(1.0, CAMERA_SMOOTHING * dt)
 
     def damage_enemy(self, enemy, amount, source="hit", killer_index=0):
@@ -1856,7 +1935,7 @@ class GameLogic:
             player.ammo_reserve += gained
             self.add_floater(player.pos, f"+{gained} mun", COLORS["projectile"])
             if player.ammo_magazine <= 0 and player.reload_timer <= 0:
-                self._start_forced_reload_for(player)
+                self._start_reload_for(player)
 
         siphon = player.passives.get("ammo_siphon", 0)
         if siphon > 0 and source != "special" and self.random.random() < min(0.40, 0.030 * siphon):
@@ -1865,7 +1944,7 @@ class GameLogic:
             player.add_special(1.5 + siphon * 0.35, "ranged" if source in ("projectile", "poison", "storm") else "melee")
             self.add_floater(player.pos, f"+{gained} mun", COLORS["projectile"])
             if player.ammo_magazine <= 0 and player.reload_timer <= 0:
-                self._start_forced_reload_for(player)
+                self._start_reload_for(player)
 
     def damage_destructible(self, item, amount):
         item.hp -= amount
@@ -1898,11 +1977,19 @@ class GameLogic:
         if drop.kind == "xp":
             self.add_xp(drop.value, player)
         elif drop.kind == "ammo":
+            max_res = self.max_ammo_reserve_for(player)
+            if player.ammo_reserve >= max_res:
+                if player.full_ammo_msg_timer <= 0:
+                    self.add_floater(player.pos, "Cheio!", COLORS["muted"])
+                    player.full_ammo_msg_timer = 2.0
+                return False
+                
             amount = int(drop.value)
-            player.ammo_reserve += amount
-            self.add_floater(player.pos, f"+{amount} mun", COLORS["projectile"])
+            added = min(amount, max_res - player.ammo_reserve)
+            player.ammo_reserve += added
+            self.add_floater(player.pos, f"+{added} mun", COLORS["projectile"])
             if player.ammo_magazine <= 0 and player.reload_timer <= 0:
-                self._start_forced_reload_for(player)
+                self._start_reload_for(player)
         elif drop.kind == "coin":
             if self.multiplayer:
                 self.shared_coins += 1
@@ -1920,6 +2007,7 @@ class GameLogic:
             self.message = "Escudo ativo: invulneravel, rapido e repelente."
         elif drop.kind == "item_box":
             self.grant_random_item(player.player_index)
+        return True
 
     def grant_random_item(self, player_index=0):
         inv = self.get_inventory(player_index)
@@ -2218,6 +2306,65 @@ class GameLogic:
     def add_xp(self, amount, player=None):
         if player is None:
             player = self.player
+        
+        # XP Compartilhado no Multiplayer
+        if self.multiplayer:
+            self.shared_xp += amount
+            for p in self.players:
+                p.score += int(amount * 3) # Score dividido
+            
+            while self.shared_xp >= self.shared_xp_to_next:
+                self.shared_xp -= self.shared_xp_to_next
+                self.shared_level += 1
+                for p in self.players:
+                    p.level = self.shared_level # Sincroniza níveis
+                
+                # Pontos de inventário ainda são individuais para cada nível
+                for inv in self.inventories:
+                    inv.points += 1
+                
+                self.shared_xp_to_next = int(40 + 25 * self.shared_level)
+                self.level_up_pending = True
+                
+                # Lógica de Draft
+                major = self.shared_level % 3 == 0
+                self.upgrade_is_major = major
+                
+                if major:
+                    # Recompensas do nível especial para o time
+                    for inv in self.inventories:
+                        inv.points += 2
+                    for p in self.players:
+                        if not p.is_down:
+                            self.spawn_drop("item_box", p.pos + self.random_offset(120), 1)
+                    
+                    # Upgrades grandes são individuais (um após o outro)
+                    self.level_up_player_index = 0
+                    if len(self.players) > 1 and self.players[0].is_down and not self.players[1].is_down:
+                        self.level_up_player_index = 1
+                        
+                    self.draft_active = False
+                    self.upgrade_choices = self.generate_upgrade_choices(True, self.level_up_player_index)
+                else:
+                    # Upgrades comuns são via DRAFT
+                    self.draft_active = True
+                    self.draft_turn_player = self.draft_first_picker
+                    
+                    # Se o jogador da vez estiver morto e o outro não, passa a vez pro vivo
+                    if len(self.players) > 1 and self.players[self.draft_turn_player].is_down:
+                        other_player = 1 - self.draft_turn_player
+                        if not self.players[other_player].is_down:
+                            self.draft_turn_player = other_player
+                            
+                    self.level_up_player_index = self.draft_turn_player
+                    self.upgrade_choices = self.generate_upgrade_choices(False, self.draft_turn_player)
+                    # O draft alterna quem começa a cada nível
+                    self.draft_first_picker = 1 - self.draft_first_picker
+                
+                self.message = "DRAFT: escolha um upgrade!" if self.draft_active else "Evolução de Classe!"
+                break
+            return
+
         pi = player.player_index
         inv = self.get_inventory(pi)
         player.xp += amount
@@ -2295,10 +2442,6 @@ class GameLogic:
             player.sword_range_bonus += 0.35
             player.attack_rate_bonus += 0.15
 
-        self.level_up_pending = False
-        self.upgrade_is_major = False
-        self.upgrade_choices = []
-
         data = UPGRADES.get(upgrade_key)
         if not data:
             data = OMNI_UPGRADES.get(upgrade_key)
@@ -2306,7 +2449,38 @@ class GameLogic:
             data = CHARACTERS[player.char_class]["passives"].get(upgrade_key)
 
         title = data["title"] if data else upgrade_key
-        self.message = f"Upgrade aplicado: {title}"
+        self.message = f"J{player_index + 1} escolheu: {title}"
+
+        # Lógica de Draft Multiplayer
+        if self.multiplayer and self.draft_active:
+            if player_index == self.draft_turn_player: # Jogador da vez
+                # Remove a escolha da lista
+                if upgrade_key in self.upgrade_choices:
+                    self.upgrade_choices.remove(upgrade_key)
+                
+                # Se ainda houver um segundo turno no draft
+                if len(self.upgrade_choices) > 1: # Tinha 3, sobrou 2
+                    self.draft_turn_player = 1 - self.draft_turn_player
+                    self.level_up_player_index = self.draft_turn_player
+                    # Mantém o level_up_pending = True para o próximo jogador
+                    return
+                else:
+                    # Fim do draft: limpa tudo
+                    self.draft_active = False
+                    self.level_up_pending = False
+                    self.upgrade_choices = []
+            return
+
+        # Lógica de Upgrades Grandes Multiplayer (sequencial)
+        if self.multiplayer and self.upgrade_is_major and player_index == 0:
+            # P1 terminou, agora vez do P2
+            self.level_up_player_index = 1
+            self.upgrade_choices = self.generate_upgrade_choices(True, 1)
+            return
+
+        self.level_up_pending = False
+        self.upgrade_is_major = False
+        self.upgrade_choices = []
 
     def spawn_drop(self, kind, pos, value=1):
         radius = 8

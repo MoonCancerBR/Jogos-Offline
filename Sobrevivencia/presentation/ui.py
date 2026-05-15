@@ -5,11 +5,11 @@ import pygame
 from pygame.math import Vector2
 
 if __package__:
-    from .constants import *
-    from .items import BASE_ITEM_KEYS, ITEM_DEFINITIONS, InventoryItem, MAX_ACTIVE_ITEMS, MAX_ITEM_LEVEL, item_display_name, item_short_description
+    from ..data.constants import *
+    from ..data.items import BASE_ITEM_KEYS, ITEM_DEFINITIONS, InventoryItem, MAX_ACTIVE_ITEMS, MAX_ITEM_LEVEL, item_display_name, item_short_description
 else:
-    from constants import *
-    from items import BASE_ITEM_KEYS, ITEM_DEFINITIONS, InventoryItem, MAX_ACTIVE_ITEMS, MAX_ITEM_LEVEL, item_display_name, item_short_description
+    from Sobrevivencia.data.constants import *
+    from Sobrevivencia.data.items import BASE_ITEM_KEYS, ITEM_DEFINITIONS, InventoryItem, MAX_ACTIVE_ITEMS, MAX_ITEM_LEVEL, item_display_name, item_short_description
 
 
 def hex_color(value):
@@ -28,7 +28,7 @@ class UI:
 
         self.item_icons = {}
         import os
-        base_path = os.path.join(os.path.dirname(__file__), "assets")
+        base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "items")
         for key in ["storm_core", "guardian_plate", "magnet_orb", "chrono_boots", "blade_relay"]:
             try:
                 img = pygame.image.load(os.path.join(base_path, f"{key}.png")).convert_alpha()
@@ -373,6 +373,20 @@ class UI:
 
         pygame.draw.circle(self.screen, (15, 23, 42), (x, y), int(player.radius), 2)
 
+        if not player.is_down and player.ammo_magazine <= 0:
+            pulse = (pygame.time.get_ticks() // 250) % 2 == 0
+            if pulse:
+                msg = "SEM MUNICAO!" if player.ammo_reserve <= 0 else "RECARREGANDO"
+                color = hex_color(COLORS["health"]) if player.ammo_reserve <= 0 else hex_color(COLORS["coin"])
+                ammo_text = self.font_small.render(msg, True, color)
+                text_rect = ammo_text.get_rect(center=(x, y - int(player.radius) - 20))
+                
+                # Create a semi-transparent background
+                bg_surf = pygame.Surface((text_rect.width + 12, text_rect.height + 6), pygame.SRCALPHA)
+                pygame.draw.rect(bg_surf, (15, 23, 42, 200), bg_surf.get_rect(), border_radius=4)
+                self.screen.blit(bg_surf, (text_rect.x - 6, text_rect.y - 3))
+                self.screen.blit(ammo_text, text_rect)
+
         # Relic aura: two rotating fire circles
         inv = game.get_inventory(player.player_index)
         has_relic = any(item.is_relic for item in inv.active_items())
@@ -467,14 +481,18 @@ class UI:
 
         ammo_capacity = max(1, game.magazine_capacity())
         ammo_fill = player.ammo_magazine / ammo_capacity
-        ammo_label = f"MUN {player.ammo_magazine}/{ammo_capacity}"
+        ammo_label = f"PNT {player.ammo_magazine}/{ammo_capacity}"
         if player.reload_timer > 0:
             ammo_fill = 1.0 - min(1.0, player.reload_timer / max(0.01, player.reload_duration))
             ammo_label = f"REC {player.reload_timer:.1f}"
         self._mini_cooldown(448, 44, 104, 23, ammo_label, ammo_fill)
 
+        max_reserve = game.max_ammo_reserve_for(player)
+        reserve_fill = player.ammo_reserve / max_reserve
+        self._mini_cooldown(560, 44, 104, 23, f"RES {player.ammo_reserve}/{max_reserve}", reserve_fill)
+
         dash_fill = 1.0 - min(1.0, player.dash_cooldown / DASH_COOLDOWN)
-        self._mini_cooldown(558, 44, 62, 23, "DASH", dash_fill)
+        self._mini_cooldown(552, 18, 62, 23, "DASH", dash_fill)
 
         info = f"Abates {player.kills}   Moedas {player.coins}   Pontos {player.score}"
         self.screen.blit(self.font_small.render(info, True, hex_color(COLORS["text"])), (632, 17))
@@ -524,13 +542,17 @@ class UI:
         self._bar(x, y + 52, 220, 10, player.special_melee / SPECIAL_MAX, COLORS["sword"], "#3A2A08", "ESP MELEE")
         capacity = max(1, game.magazine_capacity_for(player))
         ammo_fill = player.ammo_magazine / capacity
-        ammo_label = f"MUN {player.ammo_magazine}/{capacity}"
+        ammo_label = f"PNT {player.ammo_magazine}/{capacity}"
         if player.reload_timer > 0:
             ammo_fill = 1.0 - min(1.0, player.reload_timer / max(0.01, player.reload_duration))
             ammo_label = f"REC {player.reload_timer:.1f}"
         self._mini_cooldown(x + 230, y + 18, 78, 22, ammo_label, ammo_fill)
         dash_fill = 1.0 - min(1.0, player.dash_cooldown / DASH_COOLDOWN)
         self._mini_cooldown(x + 230, y + 46, 78, 22, "DASH", dash_fill)
+
+        max_res = game.max_ammo_reserve_for(player)
+        res_fill = player.ammo_reserve / max_res
+        self._mini_cooldown(x + 316, y + 18, 78, 22, f"RES {player.ammo_reserve}/{max_res}", res_fill)
 
     def _draw_passive_slots(self, game):
         player = game.player
@@ -682,7 +704,7 @@ class UI:
         buttons.append(self._button(410, 362, 280, 48, "Comandos", "commands", mouse_pos, COLORS["special"], selected == 1))
         buttons.append(self._button(410, 424, 280, 48, "Configuracoes", "settings", mouse_pos, COLORS["upgrade"], selected == 2))
         buttons.append(self._button(410, 486, 280, 48, "Voltar ao Menu", "menu", mouse_pos, COLORS["muted_2"], selected == 3))
-        pygame.display.flip()
+        # pygame.display.flip()
         return buttons
 
     def render_mode_select(self, mouse_pos, selected=0, joystick_count=0):
@@ -695,7 +717,7 @@ class UI:
         buttons.append(self._button(410, 302, 280, 48, "Single-Player", "single_player", mouse_pos, COLORS["xp"], selected == 0))
         buttons.append(self._button(410, 364, 280, 48, "Multiplayer", "multiplayer", mouse_pos, COLORS["special"], selected == 1))
         buttons.append(self._button(410, 426, 280, 48, "Voltar", "back", mouse_pos, COLORS["muted_2"], selected == 2))
-        pygame.display.flip()
+        # pygame.display.flip()
         return buttons
 
     def render_character_select(self, char_class, mouse_pos, multiplayer=False, char_class_2=None, active_player=0):
@@ -750,7 +772,7 @@ class UI:
         buttons = []
         label = "Confirmar P1" if multiplayer and active_player == 0 else "Iniciar Coop" if multiplayer else "Confirmar (Enter)"
         buttons.append(self._button(410, 620, 280, 48, label, "start_game", mouse_pos, COLORS["xp"]))
-        pygame.display.flip()
+        # pygame.display.flip()
         return buttons
 
     def render_pause(self, game, options, selected, mouse_pos):
@@ -761,7 +783,35 @@ class UI:
         self.render_game(game, mouse_pos, flip=False)
         title = "FIM DA SOBREVIVENCIA"
         options = [("Reiniciar", "restart"), ("Trocar Personagem", "change_character"), ("Voltar ao Menu", "menu"), ("Fechar", "quit")]
-        return self._overlay_menu(title, options, selected, mouse_pos, extra=f"Tempo {int(game.time_alive)}s  |  Abates {game.player.kills}  |  Pontos {game.player.score}")
+        buttons = self._overlay_menu(title, options, selected, mouse_pos, extra=f"Tempo {int(game.time_alive)}s  |  Abates {game.player.kills}  |  Pontos {game.player.score}")
+
+        def draw_build_for_player(p, x_start, y_start, label):
+            self._center_text(label, self.font_small, y_start, COLORS["muted_2"])
+            inv = game.get_inventory(p.player_index)
+            active_items = [item for item in inv.item_list() if inv.is_active(item.key)]
+            # Itens
+            for i in range(5):
+                slot_rect = pygame.Rect(x_start + i * 44 - (5 * 44) // 2 + 22, y_start + 24, 38, 38)
+                pygame.draw.rect(self.screen, (30, 41, 59), slot_rect, width=1, border_radius=4)
+                if i < len(active_items):
+                    self._draw_item_icon(active_items[i], slot_rect, game, show_level=True)
+            # Passivas
+            passives = [(k, v) for k, v in p.passives.items() if v > 0]
+            for i in range(10):
+                slot_rect = pygame.Rect(x_start + i * 26 - (10 * 26) // 2 + 13, y_start + 70, 22, 22)
+                pygame.draw.rect(self.screen, (30, 41, 59), slot_rect, width=1, border_radius=2)
+                if i < len(passives):
+                    pygame.draw.rect(self.screen, hex_color(COLORS["text"]), slot_rect, border_radius=2)
+                    lvl_text = self.font_tiny.render(str(passives[i][1]), True, hex_color(COLORS["bg"]))
+                    self.screen.blit(lvl_text, (slot_rect.centerx - lvl_text.get_width() // 2, slot_rect.centery - lvl_text.get_height() // 2))
+
+        if game.multiplayer:
+            draw_build_for_player(game.player, SCREEN_WIDTH // 4, 520, f"BUILD J1 ({CHARACTERS[game.player.char_class]['name']})")
+            draw_build_for_player(game.player2, (SCREEN_WIDTH // 4) * 3, 520, f"BUILD J2 ({CHARACTERS[game.player2.char_class]['name']})")
+        else:
+            draw_build_for_player(game.player, SCREEN_WIDTH // 2, 520, f"BUILD FINAL ({CHARACTERS[game.player.char_class]['name']})")
+
+        return buttons
 
     def render_commands(self, mouse_pos, lines=None):
         self.screen.fill(hex_color(COLORS["bg"]))
@@ -788,10 +838,10 @@ class UI:
             self._center_text(line, self.font_small, y, COLORS["muted"])
             y += 28
         buttons = [self._button(410, 620, 280, 48, "Voltar", "back", mouse_pos, COLORS["muted_2"])]
-        pygame.display.flip()
+        # pygame.display.flip()
         return buttons
 
-    def render_settings(self, rows, selected, selected_slot, capture_binding, fullscreen, joystick_count, mouse_pos):
+    def render_settings(self, rows, selected, selected_slot, capture_binding, fullscreen, control_pref, joystick_count, mouse_pos):
         self.screen.fill(hex_color(COLORS["bg"]))
         self._draw_menu_background()
         self._center_text("CONFIGURACOES", self.font_big, 54, COLORS["text"])
@@ -839,14 +889,18 @@ class UI:
                 buttons.append((f"bind:{row['action']}:{slot}", binding_rect))
             y += row_h
 
-        status = "Tela cheia: ligada" if fullscreen else "Tela cheia: desligada"
+        status = "Tela cheia: ON" if fullscreen else "Tela cheia: OFF"
         hint = "R restaura padrao  |  Esc volta" if not capture_binding else "Aguardando entrada..."
-        self._center_text(hint, self.font_tiny, 604, COLORS["muted"])
+        self._center_text(hint, self.font_tiny, 608, COLORS["muted"])
 
-        buttons.append(self._button(180, 632, 220, 42, status, "settings_fullscreen", mouse_pos, COLORS["special"]))
-        buttons.append(self._button(440, 632, 220, 42, "Restaurar padrao", "settings_reset", mouse_pos, COLORS["upgrade"]))
-        buttons.append(self._button(700, 632, 220, 42, "Voltar", "settings_back", mouse_pos, COLORS["muted_2"]))
-        pygame.display.flip()
+        pref_labels = {"auto": "Entrada: AUTO", "keyboard": "Entrada: TECLADO", "joystick": "Entrada: CONTROLE"}
+        pref_text = pref_labels.get(control_pref, "Entrada: AUTO")
+
+        buttons.append(self._button(86, 632, 220, 42, status, "settings_fullscreen", mouse_pos, COLORS["special"]))
+        buttons.append(self._button(322, 632, 220, 42, pref_text, "settings_control", mouse_pos, COLORS["muted"]))
+        buttons.append(self._button(558, 632, 220, 42, "Restaurar padrao", "settings_reset", mouse_pos, COLORS["upgrade"]))
+        buttons.append(self._button(794, 632, 220, 42, "Voltar", "settings_back", mouse_pos, COLORS["muted_2"]))
+        # pygame.display.flip()
         return buttons
 
     def render_stat_shop(self, game, mouse_pos):
@@ -873,7 +927,7 @@ class UI:
             self._center_text(f"Maior nivel atual {current_level}. Faltam {needed} niveis.", self.font, 276, COLORS["muted"])
             self._center_text("Depois de desbloqueada, use pontos de nivel para roletar status permanentes.", self.font_small, 322, COLORS["muted"])
             buttons.append(self._button(panel.centerx - 110, panel.bottom - 56, 220, 40, "Voltar", "stat_shop_back", mouse_pos, COLORS["muted_2"]))
-            pygame.display.flip()
+            # pygame.display.flip()
             return buttons
 
         subtitle = self.font_tiny.render(
@@ -889,7 +943,7 @@ class UI:
             color = COLORS["xp"] if game.inventory.points >= STAT_SHOP_ROLL_COST else COLORS["muted_2"]
             buttons.append(self._button(panel.centerx - 130, 366, 260, 48, f"Roletar ({STAT_SHOP_ROLL_COST} pt)", "stat_shop_roll", mouse_pos, color))
             buttons.append(self._button(panel.centerx - 110, panel.bottom - 56, 220, 40, "Voltar", "stat_shop_back", mouse_pos, COLORS["muted_2"]))
-            pygame.display.flip()
+            # pygame.display.flip()
             return buttons
 
         card_w = 292
@@ -938,7 +992,7 @@ class UI:
 
         self._center_text("Teclas 1/2/3 compram as ofertas. Esc volta ao pause.", self.font_tiny, panel.bottom - 74, COLORS["muted"])
         buttons.append(self._button(panel.centerx - 110, panel.bottom - 44, 220, 34, "Voltar", "stat_shop_back", mouse_pos, COLORS["muted_2"]))
-        pygame.display.flip()
+        # pygame.display.flip()
         return buttons
 
     def render_upgrade(self, game, selected, mouse_pos):
@@ -946,34 +1000,63 @@ class UI:
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((5, 10, 18, 205))
         self.screen.blit(overlay, (0, 0))
-        player = game.get_player(game.level_up_player_index)
+        player_index = game.level_up_player_index
+        player = game.get_player(player_index)
+        
+        # Cor do turno
+        turn_color = hex_color(P2_AIM_COLOR if player_index == 1 else P1_AIM_COLOR)
+        
         title = "MELHORIA GRANDE" if game.upgrade_is_major else "NOVO NIVEL"
         subtitle = "Escolha um poder permanente raro" if game.upgrade_is_major else "Escolha um upgrade permanente"
         if game.multiplayer:
-            subtitle = f"Turno do Jogador {game.level_up_player_index + 1} - " + subtitle
+            subtitle = f"Turno do Jogador {player_index + 1} - " + subtitle
+        
+        # Brilho de turno
+        pulse = 0.5 + 0.5 * math.sin(pygame.time.get_ticks() * 0.006)
+        glow_rect = pygame.Rect(SCREEN_WIDTH // 2 - 300, 100, 600, 100)
+        pygame.draw.rect(self.screen, (*turn_color, int(40 * pulse)), glow_rect, border_radius=20)
+
         self._center_text(title, self.font_big, 116, COLORS["text"])
         self._center_text(subtitle, self.font, 166, COLORS["muted"])
+        
+        # Texto de turno destacado
+        turn_text = f"VEZ DO JOGADOR {player_index + 1}"
+        turn_surf = self.font_title.render(turn_text, True, turn_color)
+        self.screen.blit(turn_surf, (SCREEN_WIDTH // 2 - turn_surf.get_width() // 2, 210))
+
         buttons = []
-        y = 244
+        y = 254
         for index, key in enumerate(game.upgrade_choices):
             data = UPGRADES.get(key)
             if not data:
                 data = OMNI_UPGRADES.get(key)
             if not data:
                 data = CHARACTERS[player.char_class]["passives"].get(key)
+            if not data: continue
+            
             rect = pygame.Rect(260, y, 580, 78)
             active = rect.collidepoint(mouse_pos) or index == selected
-            color = hex_color(COLORS["upgrade"] if active else COLORS["panel"])
-            pygame.draw.rect(self.screen, color, rect, border_radius=7)
+            
+            bg_color = hex_color(COLORS["upgrade"] if active else COLORS["panel"])
+            if active:
+                # Se estiver selecionado, usa a cor do jogador
+                pygame.draw.rect(self.screen, (*turn_color, 40), rect.inflate(10, 10), border_radius=10)
+                bg_color = turn_color
+
+            pygame.draw.rect(self.screen, bg_color, rect, border_radius=7)
             border_color = (226, 232, 240) if active else (51, 65, 85)
             pygame.draw.rect(self.screen, border_color, rect, width=1, border_radius=7)
-            title = self.font_title.render(data["title"], True, hex_color(COLORS["text"]))
-            desc = self.font_small.render(data["description"], True, hex_color(COLORS["text"] if active else COLORS["muted"]))
-            self.screen.blit(title, (rect.x + 24, rect.y + 12))
-            self.screen.blit(desc, (rect.x + 24, rect.y + 47))
+            
+            text_color = (255, 255, 255) if active else hex_color(COLORS["text"])
+            title_surf = self.font_title.render(data["title"], True, text_color)
+            desc_surf = self.font_small.render(data["description"], True, text_color if active else hex_color(COLORS["muted"]))
+            
+            self.screen.blit(title_surf, (rect.x + 24, rect.y + 12))
+            self.screen.blit(desc_surf, (rect.x + 24, rect.y + 47))
             buttons.append((key, rect))
             y += 94
-        pygame.display.flip()
+        
+        # pygame.display.flip() # Handled by main loop
         return buttons
 
     def render_inventory(self, game, selected, mouse_pos, flip=True):
@@ -1075,7 +1158,7 @@ class UI:
         self._center_text(hint, self.font_tiny, 640, COLORS["muted"])
         buttons.append(self._button(410, 662, 280, 42, "Voltar ao Jogo", "resume", mouse_pos, COLORS["muted_2"]))
         if flip:
-            pygame.display.flip()
+            pass  # pygame.display.flip() handled by main loop
         return buttons
 
     def render_skills(self, game, selected, mouse_pos):
@@ -1171,7 +1254,7 @@ class UI:
             buttons.append(self._button(detail_rect.x + 22, detail_rect.bottom - 62, 220, 40, "Upar Skill", "skill_upgrade", mouse_pos, button_color))
 
         buttons.append(self._button(panel.centerx - 110, panel.bottom - 52, 220, 38, "Voltar", "skills_back", mouse_pos, COLORS["muted_2"]))
-        pygame.display.flip()
+        # pygame.display.flip()
         return buttons
 
     def construction_catalog(self):
@@ -1258,7 +1341,7 @@ class UI:
 
         self._draw_construction_detail(game, selected_item, detail_rect)
         buttons.append(self._button(panel.centerx - 110, panel.bottom - 52, 220, 38, "Voltar", "constructions_back", mouse_pos, COLORS["muted_2"]))
-        pygame.display.flip()
+        # pygame.display.flip()
         return buttons
 
     def render_fusion_confirm(self, game, inventory_selected, choice_selected, mouse_pos):
@@ -1305,7 +1388,7 @@ class UI:
             button_color = COLORS["upgrade"] if index == choice_selected else color
             buttons.append(self._button(panel.x + 126 + index * 230, panel.bottom - 58, 170, 40, label, action, mouse_pos, button_color))
 
-        pygame.display.flip()
+        # pygame.display.flip()
         return buttons
 
     def _draw_item_icon(self, item, rect, game, show_level=True):
@@ -1503,7 +1586,7 @@ class UI:
         for index, (label, action) in enumerate(options):
             color = COLORS["upgrade"] if index == selected else COLORS["panel_2"]
             buttons.append(self._button(410, start_y + index * spacing, 280, button_h, label, action, mouse_pos, color))
-        pygame.display.flip()
+        # pygame.display.flip()
         return buttons
 
     def _draw_quest_panel(self, game):

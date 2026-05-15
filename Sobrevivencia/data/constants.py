@@ -99,6 +99,10 @@ CONTACT_DAMAGE_PER_SECOND = 17.0
 CAMERA_SMOOTHING = 9.5
 SCREEN_SHAKE_DECAY = 5.5
 
+# Configurações de Câmera Dinâmica
+CAMERA_ZOOM_MIN_SCALE = 0.85
+CAMERA_ZOOM_MAX_DISTANCE = 550
+
 # Multiplayer Co-op
 TETHER_MAX_DISTANCE = 650
 TETHER_TELEPORT_MARGIN = 60
@@ -217,9 +221,9 @@ ENEMY_TYPES = {
     "spitter": {
         "name": "Atirador Acido",
         "radius": 16,
-        "speed": 108.0,
+        "speed": 92.0,  # Reduzido de 108
         "health": 58,
-        "damage": 13.0,
+        "damage": 9.0,   # Reduzido de 13
         "xp": 18,
         "color": "#84CC16",
         "special": 11,

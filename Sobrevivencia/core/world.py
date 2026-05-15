@@ -4,11 +4,11 @@ import random
 from pygame.math import Vector2
 
 if __package__:
-    from .constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
+    from ..data.constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
     from .entities import Destructible, Hazard, RectBody
 else:
-    from constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
-    from entities import Destructible, Hazard, RectBody
+    from Sobrevivencia.data.constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
+    from Sobrevivencia.core.entities import Destructible, Hazard, RectBody
 
 
 def stable_hash(x, y, salt=0):

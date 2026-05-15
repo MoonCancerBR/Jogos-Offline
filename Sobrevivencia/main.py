@@ -2,22 +2,23 @@ import pygame
 from pygame.math import Vector2
 
 if __package__:
-    from .constants import FPS, SCREEN_HEIGHT, SCREEN_WIDTH, CHARACTERS, SPECIAL_COMBO_HOLD_SECONDS
-    from .game_logic import GameLogic
-    from .ui import UI
+    from .data.constants import FPS, SCREEN_HEIGHT, SCREEN_WIDTH, CHARACTERS, SPECIAL_COMBO_HOLD_SECONDS
+    from .core.game_logic import GameLogic
+    from .presentation.ui import UI
 else:
-    from constants import FPS, SCREEN_HEIGHT, SCREEN_WIDTH, CHARACTERS, SPECIAL_COMBO_HOLD_SECONDS
-    from game_logic import GameLogic
-    from ui import UI
+    from Sobrevivencia.data.constants import FPS, SCREEN_HEIGHT, SCREEN_WIDTH, CHARACTERS, SPECIAL_COMBO_HOLD_SECONDS
+    from Sobrevivencia.core.game_logic import GameLogic
+    from Sobrevivencia.presentation.ui import UI
 
 
 PAUSE_OPTIONS = [
     ("Continuar", "resume"),
-    ("Comandos", "commands"),
-    ("Configuracoes", "settings"),
+    ("Inventario", "inventory"),
     ("Gerenciamento de Skills", "skills"),
     ("Loja de Status", "stat_shop"),
     ("Construcoes", "constructions"),
+    ("Comandos", "commands"),
+    ("Configuracoes", "settings"),
     ("Trocar Personagem", "change_character"),
     ("Reiniciar", "restart"),
     ("Voltar ao Menu", "menu"),
@@ -138,13 +139,28 @@ class SobrevivenciaGame:
         special_hold_time = {0: 0.0, 1: 0.0}
         special_hold_triggered = {0: False, 1: False}
         special_combo_checked = {0: False, 1: False}
-        aim_mode = "mouse"
         joystick_aim_dir = Vector2(1, 0)
+        aim_mode = "mouse"
         running = True
+        
+        # Virtual Screen para Smoothscale Fullscreen
+        self.virtual_screen = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        ui.screen = self.virtual_screen
+        self.active_device = "keyboard" # "keyboard" ou "joystick"
+        self.control_preference = "auto" # "auto", "keyboard", "joystick"
 
         while running:
             dt = clock.tick(FPS) / 1000.0
-            mouse_pos = pygame.mouse.get_pos()
+            
+            final_screen = pygame.display.get_surface()
+            raw_mouse_pos = pygame.mouse.get_pos()
+            fw, fh = final_screen.get_size()
+            vw, vh = self.virtual_screen.get_size()
+            if fw != vw or fh != vh:
+                mouse_pos = (int(raw_mouse_pos[0] * vw / fw), int(raw_mouse_pos[1] * vh / fh))
+            else:
+                mouse_pos = raw_mouse_pos
+                
             joystick_aim = self._joystick_aim_vector()
             if joystick_aim.length_squared() > 0:
                 joystick_aim_dir = joystick_aim.normalize()
@@ -173,9 +189,39 @@ class SobrevivenciaGame:
                     self._remove_joystick(event.instance_id)
                     if not self._joystick_count():
                         aim_mode = "mouse"
+                        self.active_device = "keyboard"
                     game.message = self._joystick_status_message()
 
-                elif state == "settings" and capture_binding:
+                # Detecção de Dispositivo Ativo (Apenas se estiver em "auto")
+                if self.control_preference == "auto":
+                    if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.MOUSEMOTION):
+                        self.active_device = "keyboard"
+                        aim_mode = "mouse"
+                    elif event.type in (pygame.JOYBUTTONDOWN, pygame.JOYAXISMOTION, pygame.JOYHATMOTION):
+                        self.active_device = "joystick"
+                        aim_mode = "joystick"
+                else:
+                    self.active_device = self.control_preference
+                    aim_mode = "joystick" if self.active_device == "joystick" else "mouse"
+
+                # Input Lock Multiplayer no Draft / Level Up
+                if game.multiplayer and game.level_up_pending:
+                    is_joystick_event = event.type in (pygame.JOYBUTTONDOWN, pygame.JOYAXISMOTION, pygame.JOYHATMOTION)
+                    is_keyboard_event = event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN)
+                    
+                    if game.level_up_player_index == 0: # Turno do P1 (Teclado)
+                        if is_joystick_event: continue
+                    else: # Turno do P2 (Joystick)
+                        if is_keyboard_event: continue
+                
+                # Trava de Dispositivo Singleplayer (Gameplay)
+                if not game.multiplayer and state == "playing":
+                    if self.active_device == "joystick" and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                        continue
+                    if self.active_device == "keyboard" and event.type in (pygame.JOYBUTTONDOWN, pygame.JOYAXISMOTION):
+                        continue
+
+                if state == "settings" and capture_binding:
                     binding = self._binding_from_event(event)
                     if binding is not None:
                         action_key, slot = capture_binding
@@ -211,6 +257,13 @@ class SobrevivenciaGame:
                                     elif action == "settings_fullscreen":
                                         fullscreen = not fullscreen
                                         screen, fullscreen = self._set_display_mode(fullscreen, ui)
+                                    elif action == "settings_control":
+                                        prefs = ["auto", "keyboard", "joystick"]
+                                        curr = prefs.index(self.control_preference)
+                                        self.control_preference = prefs[(curr + 1) % len(prefs)]
+                                        if self.control_preference != "auto":
+                                            self.active_device = self.control_preference
+                                            aim_mode = "joystick" if self.active_device == "joystick" else "mouse"
                                     elif action.startswith("bind:"):
                                         _, action_key, slot = action.split(":", 2)
                                         settings_selected = self._control_index(action_key)
@@ -1014,7 +1067,7 @@ class SobrevivenciaGame:
                 elif game.game_over:
                     state = "game_over"
                     game_over_selected = 0
-                ui.render_game(game, aim_pos, aim_from_joystick=aim_mode == "joystick", p2_aim_pos=p2_aim_screen)
+                ui.render_game(game, aim_pos, flip=False, aim_from_joystick=aim_mode == "joystick", p2_aim_pos=p2_aim_screen)
                 button_rects = []
             elif state == "start":
                 button_rects = ui.render_start(mouse_pos, start_selected)
@@ -1043,6 +1096,7 @@ class SobrevivenciaGame:
                     settings_slot,
                     capture_binding,
                     fullscreen,
+                    self.control_preference,
                     self._joystick_count(),
                     mouse_pos,
                 )
@@ -1064,6 +1118,13 @@ class SobrevivenciaGame:
                 button_rects = ui.render_fusion_confirm(game, inventory_selected, fusion_confirm_selected, mouse_pos)
             elif state == "game_over":
                 button_rects = ui.render_game_over(game, mouse_pos, game_over_selected)
+
+            # Final Smoothscale Render
+            if fw != vw or fh != vh:
+                pygame.transform.smoothscale(self.virtual_screen, (fw, fh), final_screen)
+            else:
+                final_screen.blit(self.virtual_screen, (0, 0))
+            pygame.display.flip()
 
         pygame.quit()
         return return_action
@@ -1216,28 +1277,28 @@ class SobrevivenciaGame:
         return any(binding in self._event_pressed_bindings for binding in bindings)
 
     def _menu_up_pressed(self):
-        return self._pressed_has(("joy_axis", 1, -1), ("joy_hat", 0, 0, 1))
+        return self._pressed_has(("joy_axis", 1, -1), ("joy_hat", 0, 0, 1), ("key", pygame.K_UP), ("key", pygame.K_w))
 
     def _menu_down_pressed(self):
-        return self._pressed_has(("joy_axis", 1, 1), ("joy_hat", 0, 0, -1))
+        return self._pressed_has(("joy_axis", 1, 1), ("joy_hat", 0, 0, -1), ("key", pygame.K_DOWN), ("key", pygame.K_s))
 
     def _menu_left_pressed(self):
-        return self._pressed_has(("joy_axis", 0, -1), ("joy_hat", 0, -1, 0))
+        return self._pressed_has(("joy_axis", 0, -1), ("joy_hat", 0, -1, 0), ("key", pygame.K_LEFT), ("key", pygame.K_a))
 
     def _menu_right_pressed(self):
-        return self._pressed_has(("joy_axis", 0, 1), ("joy_hat", 0, 1, 0))
+        return self._pressed_has(("joy_axis", 0, 1), ("joy_hat", 0, 1, 0), ("key", pygame.K_RIGHT), ("key", pygame.K_d))
 
     def _menu_confirm_pressed(self):
-        return self._pressed_has(("joy_button", 0), ("joy_button", 7))
+        return self._pressed_has(("joy_button", 0), ("joy_button", 7), ("key", pygame.K_RETURN), ("key", pygame.K_SPACE))
 
     def _menu_back_pressed(self):
-        return self._pressed_has(("joy_button", 1))
+        return self._pressed_has(("joy_button", 1), ("key", pygame.K_ESCAPE), ("key", pygame.K_BACKSPACE))
 
     def _menu_x_pressed(self):
-        return self._pressed_has(("joy_button", 2))
+        return self._pressed_has(("joy_button", 2), ("key", pygame.K_x), ("key", pygame.K_u))
 
     def _menu_y_pressed(self):
-        return self._pressed_has(("joy_button", 3))
+        return self._pressed_has(("joy_button", 3), ("key", pygame.K_y), ("key", pygame.K_TAB))
 
     def _joystick_aim_vector(self):
         best = Vector2()
@@ -1307,7 +1368,10 @@ class SobrevivenciaGame:
                 continue
             seen.add(flags)
             try:
-                screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
+                if (flags & pygame.FULLSCREEN) and not (flags & getattr(pygame, "SCALED", 0)):
+                    screen = pygame.display.set_mode((0, 0), flags)
+                else:
+                    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
                 ui.screen = screen
                 return screen, applied_fullscreen
             except pygame.error:
@@ -1565,6 +1629,9 @@ class SobrevivenciaGame:
             state = "stat_shop"
         elif action == "change_character":
             state = "character_select"
+        elif action == "inventory":
+            state = "inventory"
+            game.menu_player_index = 0
         elif action == "resume":
             state = "playing"
         elif action == "restart":

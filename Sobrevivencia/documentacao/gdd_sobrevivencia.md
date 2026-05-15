@@ -1,6 +1,6 @@
 # Game Design Document (GDD): Sobrevivência
 
-**Última atualização:** 13/05/2026  
+**Última atualização:** 15/05/2026 — Reestruturação de diretórios + pasta documentacao  
 **Plataforma:** PC  
 **Tecnologia:** Python + Pygame  
 **Resolução alvo:** 1100 x 720 px, 60 FPS, com opção de tela cheia escalada  
@@ -48,12 +48,12 @@ A mudança central de arsenal é que armas de longa distância não são mais in
 - Ao recarregar, munição é movida da reserva para o pente.
 - Se a reserva estiver vazia, o jogador permanece com a arma corpo a corpo até coletar munição.
 
-### 3.2 Recarga Forçada
+### 3.2 Recarga Inteligente
 
-Quando o pente chega a 0:
+A recarga do pente inicia automaticamente sempre que o jogador troca para a arma corpo a corpo, independentemente de o pente estar zerado ou não:
 
-1. O jogo alterna automaticamente para a arma corpo a corpo.
-2. A recarga começa em segundo plano se houver munição na reserva.
+1. Se o jogador trocar manualmente para a espada com munição restante no pente, a recarga começa em segundo plano imediatamente.
+2. Quando o pente chega a 0, o jogo alterna automaticamente para a arma corpo a corpo e a recarga começa.
 3. Duração base da recarga: **2,15 s**.
 4. Ao concluir a recarga, o jogo alterna automaticamente de volta para a arma de longa distância.
 5. Se não houver reserva, a arma de longa distância fica indisponível até coletar munição.
@@ -176,13 +176,30 @@ Cada personagem possui duas armas, dois especiais e dez passivas específicas. A
 
 ## 6. Progressão
 
-### 6.1 Level Up
+### 6.1 Level Up — Singleplayer
 
 - Fórmula de XP: `40 + 25 x nível_atual`.
 - Ao subir de nível, o jogador escolhe 1 entre 3 cartas.
 - Níveis comuns oferecem upgrades gerais.
 - A cada 3 níveis, o upgrade é grande e oferece passivas específicas do personagem.
 - Quando todas as passivas específicas chegarem ao nível 10, upgrades grandes passam a oferecer Omni Upgrades.
+
+### 6.1.1 Level Up — Multiplayer (Draft por Revezamento)
+
+No modo cooperativo, o nível é **global para a dupla**. O XP coletado por qualquer jogador alimenta uma barra de nível compartilhada. Ao subir de nível, ambos os jogadores ganham a oportunidade de escolher um upgrade de status por meio de um sistema de draft:
+
+- **Pool de escolhas:** o jogo gera uma lista única com **3 opções** de status aleatórias (+vida, +velocidade, +dano etc.).
+- **Fluxo de seleção (draft):**
+  1. O Jogador A (quem tem prioridade neste nível) escolhe **1 das 3** opções disponíveis.
+  2. O Jogador B escolhe **1 das 2** opções restantes.
+  3. A opção que sobrar é **descartada**.
+- **Alternância de prioridade (anti-fixa):** o jogo rastreia quem iniciou a escolha no nível anterior. A cada novo level up, a ordem inverte automaticamente. No primeiro nível, a prioridade é definida por **sorteio** e alternada nos subsequentes.
+- **Bloqueio ativo de input:**
+  - Enquanto o Jogador A estiver selecionando, o input do Jogador B é **completamente ignorado**.
+  - Após a escolha do Jogador A, o sistema libera o input do Jogador B e bloqueia o do Jogador A automaticamente.
+  - A UI destaca com **brilho ou cursor colorido** (P1/P2) de quem é a vez em tempo real.
+- **Passivas exclusivas:** passivas específicas de personagem permanecem individuais e separadas da escolha comum de draft.
+- A cada 3 níveis, o upgrade grande continua oferecendo passivas específicas, aplicadas individualmente a cada jogador.
 
 ### 6.2 Upgrades Comuns
 
@@ -414,7 +431,7 @@ Quando a vida do Colosso cai abaixo de 45%, ele entra em fúria uma vez, ganhand
 
 ### 10.4 Novos Comportamentos
 
-- **Atirador Ácido:** mantém distância e dispara uma linha de ácido com aviso prévio.
+- **Atirador Ácido:** mantém distância e dispara uma linha de ácido com aviso prévio. A frequência do laser é moderada e o disparo é precedido por uma **linha de mira visual** (aviso de 0,6 s) antes do projétil real, dando ao jogador tempo de reagir. A lógica de fuga possui **distância máxima** para que o inimigo não se afaste infinitamente do jogador; ao atingir o limite, ele recua lentamente ou para de fugir.
 - **Guardião Blindado:** protege inimigos próximos, reduzindo dano recebido por eles.
 - **Demolidor Instável:** corre até o jogador e explode ao se aproximar.
 
@@ -498,13 +515,34 @@ Mensagem exibida: `Minuto N: inimigos mais fortes!`
 | Pause | Continuar, comandos, configurações, skills, construções, trocar personagem, reiniciar, voltar ao menu ou fechar. |
 | Comandos | Consulta rápida dos controles atuais e da mecânica de munição. |
 | Configurações | Alternar tela cheia, restaurar controles padrão e remapear atalhos de jogabilidade por sessão, incluindo joystick/controle. |
-| Level Up | Escolher carta de upgrade; cartas não selecionadas usam fundo escuro de alto contraste. |
+| Level Up | Escolher carta de upgrade; cartas não selecionadas usam fundo escuro de alto contraste. No multiplayer, a UI sinaliza visualmente (brilho ou cursor colorido P1/P2) de quem é a vez de escolher. |
 | Inventário | Equipar, remover, upar, marcar fusão e ver reserva. |
 | Gerenciamento de Skills | Ver skills ativas/bloqueadas e gastar pontos para desbloquear ou upar passivas. |
 | Loja de Status | Rerrolar e comprar melhorias permanentes de status a partir do nível 20. |
 | Confirmação de Fusão | Confirmar ou cancelar consumo de itens nível 10. |
 | Construções | Catálogo de itens, híbridos, relíquias e árvores de fusão. |
 | Game Over | Tempo, abates, pontuação, reinício, troca de personagem e opções finais. |
+
+### 14.1 Adaptação de Tela (Fullscreen)
+
+- O modo tela cheia utiliza a **resolução nativa do monitor** via escala de DPI, em vez de forçar mudança de resolução.
+- A superfície do jogo é renderizada na resolução lógica (1100 × 720) e escalada para a resolução nativa via `pygame.transform.smoothscale`, evitando borrões e flickering.
+- Se o modo fullscreen escalado falhar no driver/renderer local, o jogo tenta fullscreen simples e volta para janela se necessário, sem encerrar a partida.
+
+### 14.2 Fila de Ações na UI (Level Up — Multiplayer)
+
+- A interface sinaliza visualmente de quem é a vez de escolher com **brilho ou cursor colorido** (P1 azul / P2 vermelho).
+- Enquanto o Jogador A escolhe, os inputs do Jogador B para a UI são **completamente ignorados**, prevenindo seleções acidentais.
+- Após a escolha do Jogador A, o sistema libera o input do Jogador B e bloqueia o do Jogador A automaticamente.
+
+### 14.3 Trava de Dispositivo — Singleplayer
+
+No modo singleplayer, o jogo implementa detecção do dispositivo ativo para evitar conflito de inputs simultâneos entre mouse/teclado e joystick:
+
+- Quando o jogador usa o **joystick**, os eventos de mouse e teclado são ignorados pelo sistema de jogabilidade.
+- Quando o jogador usa **mouse/teclado**, os inputs do joystick são desconsiderados.
+- A troca de dispositivo ativo ocorre **automaticamente** ao detectar o primeiro input do novo dispositivo, sem necessidade de configuração manual.
+- A detecção não afeta navegação de menus, apenas inputs de jogabilidade.
 
 ### Configurações de Jogabilidade
 
@@ -518,7 +556,6 @@ Mensagem exibida: `Minuto N: inimigos mais fortes!`
 - As alterações valem apenas para a sessão atual da partida.
 - A tela possui botão para restaurar os atalhos padrão.
 - A tela cheia pode ser alternada pela janela de Configurações ou pelo atalho padrão F11.
-- Se o modo fullscreen escalado falhar no driver/renderer local, o jogo tenta fullscreen simples e volta para janela se necessário, sem encerrar a partida.
 - Se o joystick for desconectado durante a sessão, o jogo reinicializa o estado de entrada e continua em execução.
 - A tela Comandos reflete os atalhos atualmente configurados.
 
@@ -569,45 +606,55 @@ As entradas abaixo são os padrões iniciais. As ações de jogabilidade podem s
 
 ## 16. Multiplayer Local (Coop)
 
-O jogo possui modo cooperativo local para dois jogadores quando um joystick/controle e detectado.
+O jogo possui modo cooperativo local para dois jogadores quando um joystick/controle é detectado.
 
-### 16.1 Inicializacao
+### 16.1 Inicialização
 
-- Ao escolher iniciar uma partida com joystick conectado, o jogo exibe selecao entre **Single-Player** e **Multiplayer**.
-- No modo Multiplayer, a selecao de personagens ocorre em turnos: primeiro Jogador 1, depois Jogador 2.
+- Ao escolher iniciar uma partida com joystick conectado, o jogo exibe seleção entre **Single-Player** e **Multiplayer**.
+- No modo Multiplayer, a seleção de personagens ocorre em turnos: primeiro Jogador 1, depois Jogador 2.
 - Os dois jogadores podem escolher o mesmo personagem.
 - Jogador 1 usa **teclado + mouse**.
 - Jogador 2 usa **joystick/controle**.
 
-### 16.2 Camera, Tela e Tether
+### 16.2 Câmera Dinâmica (Ponto Médio)
 
-- A camera prioriza o Jogador 1.
-- Se o Jogador 1 cair, a camera passa automaticamente a seguir o Jogador 2 enquanto ele estiver vivo.
-- O Jogador 2 nao pode abandonar a tela de jogo por muito tempo: ao ultrapassar a distancia limite, ele e teletransportado para uma posicao segura proxima ao foco da camera.
+- A câmera segue o **centro geométrico** entre os dois jogadores: `CamPos = (P1 + P2) / 2`.
+- Existe um **limite de distância máxima** entre os jogadores. Quando os jogadores se afastam além desse limite, a câmera aplica um **zoom-out leve** para manter ambos visíveis.
+- Se a distância máxima de zoom for atingida, o tether impede que os jogadores se afastem mais (ver seção 16.2.1).
+- Se o Jogador 1 cair, a câmera passa automaticamente a seguir o Jogador 2 enquanto ele estiver vivo, e vice-versa.
 - As miras possuem cores distintas: Jogador 1 azul e Jogador 2 vermelho.
+
+#### 16.2.1 Tether
+
+- Os jogadores não podem se afastar além do limite máximo de tether.
+- Ao ultrapassar a distância limite, o jogador mais distante do centro é teletransportado para uma posição segura próxima ao foco da câmera.
 
 ### 16.3 Interface
 
-- O HUD cooperativo exibe vida, especiais, municao e dash dos dois jogadores em lados opostos da tela.
+- O HUD cooperativo exibe vida, especiais, munição e dash dos dois jogadores em lados opostos da tela.
 - O modo cooperativo também exibe dois painéis de status individuais, um para cada jogador, mostrando velocidade, velocidade no terreno atual, dano à distância, dano corpo a corpo, alcance, cadência de tiro, munição, reserva e pontos do inventário correspondente.
 - Moedas aparecem como recurso compartilhado.
-- Mensagens de level up e menus congelam a partida e destacam o turno do jogador que esta realizando a acao, por exemplo: `Turno do Jogador 2`.
-- Telas de gerenciamento individual, como Inventario e Gerenciamento de Skills, usam uma janela unica com indicador do jogador ativo e botao **Ver Jogador 1/2** para alternar entre os dados de cada jogador.
+- Mensagens de level up e menus congelam a partida e destacam o turno do jogador que está realizando a ação, por exemplo: `Turno do Jogador 2`.
+- Telas de gerenciamento individual, como Inventário e Gerenciamento de Skills, usam uma janela única com indicador do jogador ativo e botão **Ver Jogador 1/2** para alternar entre os dados de cada jogador.
+- **Input lock — multiplayer:** enquanto P1 escolhe na UI, os inputs de P2 são ignorados (e vice-versa), prevenindo seleções acidentais.
 
-### 16.4 Progressao e Economia
+### 16.4 Progressão e Economia
 
-- Cada jogador possui individualmente: vida, status, XP, nivel, inventario, itens passivos, passivas, municao, especiais, abates e pontuacao.
-- Moedas sao coletivas e entram em uma carteira compartilhada no modo coop.
-- Upgrades de level up sao aplicados ao jogador que subiu de nivel.
+- **XP compartilhado:** o nível é **global para a dupla**. XP coletado por qualquer jogador alimenta uma barra de nível compartilhada.
+- Ao subir de nível, ambos os jogadores ganham a oportunidade de escolher um upgrade de status via sistema de **draft por revezamento** (ver seção 6.1.1).
+- Cada jogador escolhe individualmente 1 opção de upgrade, aplicada ao seu personagem.
+- Passivas exclusivas de personagem permanecem individuais e separadas da escolha comum.
+- Cada jogador possui individualmente: vida, status, inventário, itens passivos, passivas, munição, especiais, abates e pontuação.
+- Moedas são coletivas e entram em uma carteira compartilhada no modo coop.
 - A Loja de Status continua sendo uma loja de equipe: ofertas compradas aplicam os status aos jogadores da partida.
 
 ### 16.5 Queda, Revive e Derrota
 
 - Ao zerar a vida, o jogador entra em estado de queda em vez de encerrar imediatamente a partida.
-- Um sinal de resgate aparece sobre o corpo caido.
-- O jogador vivo precisa permanecer dentro da area do sinal por **4,0 s** para reviver o aliado.
-- O jogador revivido retorna com **50% da vida maxima** e invulnerabilidade curta.
-- O Game Over so ocorre quando os dois jogadores estao caidos simultaneamente.
+- Um sinal de resgate aparece sobre o corpo caído.
+- O jogador vivo precisa permanecer dentro da área do sinal por **4,0 s** para reviver o aliado.
+- O jogador revivido retorna com **50% da vida máxima** e invulnerabilidade curta.
+- O Game Over só ocorre quando os dois jogadores estão caídos simultaneamente.
 
 ---
 
@@ -646,3 +693,129 @@ Os itens desta seção são pendências planejadas e ainda não fazem parte da i
 - Ranking local por personagem.
 - Meta-progressão entre partidas.
 - Novos mini-bosses com padrões próprios.
+
+---
+
+## 19. Arquitetura Técnica
+
+### 19.1 Estrutura de Diretórios
+
+O projeto segue uma arquitetura modular inspirada em MVC/ECS simplificado, separando responsabilidades em camadas. A estrutura foi reorganizada em 15/05/2026 para facilitar escalabilidade.
+
+> **Diagrama interativo:** consulte `documentacao/estrutura_projeto.mmd` para o diagrama Mermaid completo com responsabilidades detalhadas de cada pasta.
+
+```
+Sobrevivencia/
+│
+├── main.py                        ← Loop principal, input e state machine
+├── gdd_sobrevivencia.md           ← Este documento
+├── __init__.py                    ← Entry point do pacote Python
+│
+├── core/                          ← Motor do jogo (lógica pura)
+│   ├── game_logic.py              ← Toda a lógica de gameplay (GameLogic)
+│   ├── entities.py                ← Dataclasses: Player, Enemy, Projectile, etc.
+│   └── world.py                   ← Geração de chunks, colisão, terreno
+│
+├── data/                          ← Dados e configurações do jogo
+│   ├── constants.py               ← Todas as constantes numéricas e dicionários
+│   └── items.py                   ← Definições de itens, Inventory, fusões
+│
+├── presentation/                  ← Renderização e interface (UI)
+│   └── ui.py                      ← Toda renderização Pygame (HUD, menus, telas)
+│
+├── assets/                        ← Recursos visuais e sonoros
+│   ├── items/                     ← Ícones de itens (PNG 32x32)
+│   ├── sprites/                   ← (futuro) Sprite sheets de personagens/inimigos
+│   ├── sfx/                       ← (futuro) Efeitos sonoros (.ogg/.wav)
+│   ├── bgm/                       ← (futuro) Trilhas de fundo (.ogg)
+│   └── fonts/                     ← (futuro) Fontes customizadas (.ttf)
+│
+├── config/                        ← Configurações externas sem código
+│   ├── settings.json              ← (futuro) Resolução, volume, idioma
+│   ├── balance.json               ← (futuro) Stats editáveis sem IDE
+│   └── keybinds.json              ← (futuro) Mapeamento de teclas/gamepad
+│
+├── tools/                         ← Scripts de desenvolvimento
+│   ├── profiler.py                ← (futuro) Análise de performance
+│   └── balance_editor.py          ← (futuro) Editor de balance.json
+│
+└── documentacao/                  ← Documentação técnica e de design
+    ├── estrutura_projeto.mmd      ← Diagrama Mermaid da árvore de diretórios
+    └── gdd_sobrevivencia.md       ← Cópia canônica deste GDD
+```
+
+### 19.2 Responsabilidade de Cada Camada
+
+| Camada | Arquivo(s) | Responsabilidade |
+|---|---|---|
+| **Core / Logic** | `core/game_logic.py` | Toda a lógica de gameplay: movimento, combate, spawns, drops, progressão, multiplayer. Não importa Pygame diretamente. |
+| **Core / Entities** | `core/entities.py` | Dataclasses puras: `Player`, `Enemy`, `Projectile`, `Slash`, `Drop`, `Hazard`, `Destructible`. Sem lógica de gameplay. |
+| **Core / World** | `core/world.py` | Geração procedural de chunks, colisão círculo-retângulo, terreno e hazards do mapa. |
+| **Data / Constants** | `data/constants.py` | Todas as constantes numéricas, dicionários de terreno, inimigos, personagens e cores. É a única fonte de verdade para balanço. |
+| **Data / Backup** | `data/constants_backup.py` | Snapshot de segurança gerado antes de grandes refatorações. Não é importado em produção. |
+| **Data / Items** | `data/items.py` | Definições de itens, sistema de Inventory, lógica de fusão Híbrido/Relíquia. |
+| **Presentation** | `presentation/ui.py` | Toda a renderização Pygame: HUD, menus, telas de personagem, pause, game over. Não executa lógica de gameplay. |
+| **Entry Point** | `main.py` | Loop principal, input de teclado/joystick, state machine (menu → jogo → pause → game over). |
+| **Documentação** | `documentacao/` | GDD canônico e diagrama Mermaid da arquitetura do projeto. |
+
+### 19.3 Fluxo de Importação
+
+```
+main.py
+  ├── data.constants (FPS, tamanho de tela, personagens)
+  ├── core.game_logic (GameLogic)
+  │     ├── data.constants (todas as constantes)
+  │     ├── core.entities (dataclasses)
+  │     ├── data.items (Inventory)
+  │     └── core.world (World)
+  └── presentation.ui (UI)
+        ├── data.constants
+        └── data.items (nomes e descrições)
+
+Nota: data.constants_backup NÃO é importado em nenhum módulo de produção.
+```
+
+### 19.4 Como Adicionar Conteúdo
+
+**Novo personagem jogável:**
+1. Adicionar entrada em `CHARACTERS` em `data/constants.py` com `weapon_1`, `weapon_2`, `passives`, `specials`, `color`, etc.
+2. Implementar lógica exclusiva de especial em `core/game_logic.py` nos métodos `_cast_weapon_special` e `_cast_combo_special`.
+3. Adicionar sprite/ícone em `assets/sprites/`.
+
+**Novo inimigo/boss:**
+1. Adicionar entrada em `ENEMY_TYPES` em `data/constants.py`.
+2. Implementar comportamento de IA em `core/game_logic.py` (métodos `_<tipo>_velocity` e `_update_enemies`).
+3. Adicionar lógica de spawn em `_spawn_special_enemy` se for inimigo especial.
+
+**Novo item passivo:**
+1. Adicionar em `ITEM_DEFINITIONS` em `data/items.py`.
+2. Adicionar lógica de efeito em `core/game_logic.py`.
+3. Adicionar ícone PNG em `assets/items/`.
+
+**Nova fusão:**
+1. Adicionar em `RELIC_DEFINITIONS` em `data/constants.py` (chave = fontes ordenadas por `+`).
+2. A lógica de `preview_fusion` em `data/items.py` reconhece automaticamente relíquias registradas.
+
+**Novo obstáculo no mundo:**
+1. Adicionar tipo em `core/world.py` com lógica de colisão/geração.
+2. Registrar parâmetros visuais em `data/constants.py`.
+3. Adicionar sprite em `assets/sprites/` (quando implementado).
+
+**Novo hazard:**
+1. Adicionar entrada em `HAZARD_TYPES` em `data/constants.py`.
+2. Implementar geração e efeito em `core/world.py` e `core/game_logic.py`.
+
+**Novo bioma:**
+1. Definir paleta, terrenos e hazards em `data/constants.py`.
+2. Implementar regras de geração em `core/world.py`.
+3. Adicionar trilha em `assets/bgm/` e registrar no carregador de assets.
+
+---
+
+## 20. Histórico de Mudanças Estruturais
+
+| Data | Mudança | Responsável |
+|---|---|---|
+| 15/05/2026 | Reestruturação do projeto de arquivo único (`main.py`) para arquitetura modular MVC/ECS. Criação de `core/`, `data/`, `presentation/`, `assets/`, `config/`, `tools/`. | Antigravity AI |
+| 15/05/2026 | Criação de `data/constants_backup.py` como snapshot de segurança antes da refatoração de constantes. | Antigravity AI |
+| 15/05/2026 | Criação da pasta `documentacao/` com `estrutura_projeto.mmd` (diagrama Mermaid) e cópia canônica do GDD. Correção de numeração duplicada da seção 11. | Antigravity AI |
