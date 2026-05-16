@@ -79,6 +79,7 @@ class EnemyManager:
             special_timer=self.random.uniform(2.2, 4.0),
         )
         self.enemy_id += 1
+        self._setup_physics_entity(enemy)
 
         if not self.world.circle_hits_wall(enemy.pos, enemy.radius):
             self.enemies.append(enemy)
@@ -119,6 +120,7 @@ class EnemyManager:
             coin_chance=data["coin_chance"],
         )
         self.enemy_id += 1
+        self._setup_physics_entity(enemy)
 
         if not self.world.circle_hits_wall(enemy.pos, enemy.radius):
             self.enemies.append(enemy)
@@ -142,16 +144,19 @@ class EnemyManager:
                 enemy.lifetime -= dt
                 if enemy.lifetime <= 0 and enemy.kind == "chromatic":
                     self.add_floater(enemy.pos, "escapou", COLORS["muted"])
+                    self._cleanup_physics_entity(enemy)
                     continue
             if enemy.poison_timer > 0:
                 enemy.poison_timer = max(0, enemy.poison_timer - dt)
                 self.damage_enemy(enemy, enemy.poison_dps * dt, source="poison")
                 if enemy.health <= 0:
+                    self._cleanup_physics_entity(enemy)
                     continue
             if enemy.bleed_timer > 0:
                 enemy.bleed_timer = max(0, enemy.bleed_timer - dt)
                 self.damage_enemy(enemy, enemy.bleed_dps * dt, source="bleed")
                 if enemy.health <= 0:
+                    self._cleanup_physics_entity(enemy)
                     continue
 
             target = self._nearest_alive_player(enemy.pos)
@@ -175,7 +180,10 @@ class EnemyManager:
                 velocity += enemy.knockback
                 enemy.knockback *= max(0, 1.0 - 7.0 * dt)
 
-            enemy.pos = self._move_enemy(enemy, direction, chase_speed, velocity, dt)
+            if enemy.body:
+                enemy.body.velocity = velocity.x, velocity.y
+            else:
+                enemy.pos = self._move_enemy(enemy, direction, chase_speed, velocity, dt)
 
             # Contact damage: check all alive players
             sapper_detonated = False
@@ -195,6 +203,7 @@ class EnemyManager:
                     elif player.invulnerable_timer <= 0:
                         self._damage_player_direct(player, enemy.damage * dt)
             if sapper_detonated:
+                self._cleanup_physics_entity(enemy)
                 continue
 
             if enemy.health > 0:
@@ -297,6 +306,7 @@ class EnemyManager:
             "age": 0.0,
             "duration": 0.28,
         })
+        self.emit_particles(center, count=20, color=COLORS["coin"], speed=210, lifetime=0.34, size=5)
         self.screen_shake = max(self.screen_shake, 9.0)
         self.add_floater(center, "BOOM", COLORS["coin"])
 
@@ -317,6 +327,7 @@ class EnemyManager:
                         "age": 0.0,
                         "duration": 0.28,
                     })
+                    self.emit_particles(landing, count=28, color=COLORS["danger"], speed=230, lifetime=0.38, size=6)
                     self.screen_shake = max(self.screen_shake, 13.0)
                 elif enemy.action == "laser_warn":
                     start = Vector2(enemy.pos)
@@ -343,6 +354,7 @@ class EnemyManager:
                         "age": 0.0,
                         "duration": 0.34,
                     })
+                    self.emit_particles(center, count=30, color="#C4B5FD", speed=220, lifetime=0.42, size=5)
                     self.screen_shake = max(self.screen_shake, 12.0)
                 # summon action ends silently — minions were spawned at start
 
@@ -493,6 +505,7 @@ class EnemyManager:
             coin_chance=data["coin_chance"],
         )
         self.enemy_id += 1
+        self._setup_physics_entity(minion)
         self.enemies.append(minion)
 
     def _update_director(self, dt):

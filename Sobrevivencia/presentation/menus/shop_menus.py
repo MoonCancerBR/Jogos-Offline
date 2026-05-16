@@ -21,11 +21,11 @@ class ShopMenus:
         pygame.draw.rect(self.screen, (8, 14, 25), panel, border_radius=8)
         pygame.draw.rect(self.screen, hex_color(COLORS["xp"]), panel, width=2, border_radius=8)
 
-        title = self.font_title.render("LOJA DE STATUS", True, hex_color(COLORS["text"]))
-        self.screen.blit(title, (panel.x + 28, panel.y + 18))
+        self.font_title.render_to(self.screen, (panel.x + 28, panel.y + 18), "LOJA DE STATUS", hex_color(COLORS["text"]))
         points_label = "Pontos disponiveis" if not game.multiplayer else "Pontos da equipe"
-        points = self.font_small.render(f"{points_label}: {game.inventory.points}", True, hex_color(COLORS["xp"]))
-        self.screen.blit(points, (panel.right - points.get_width() - 28, panel.y + 22))
+        points_text = f"{points_label}: {game.inventory.points}"
+        p_surf, p_rect = self.font_small.render(points_text, hex_color(COLORS["xp"]))
+        self.screen.blit(p_surf, (panel.right - p_rect.width - 28, panel.y + 22))
 
         if not game.stat_shop_unlocked():
             current_level = max(player.level for player in game.players)
@@ -37,12 +37,8 @@ class ShopMenus:
             # pygame.display.flip()
             return buttons
 
-        subtitle = self.font_tiny.render(
-            f"Roletar abre 3 ofertas por {STAT_SHOP_ROLL_COST} ponto. Jogar novamente uma oferta custa {STAT_SHOP_REROLL_COST} ponto.",
-            True,
-            hex_color(COLORS["muted"]),
-        )
-        self.screen.blit(subtitle, (panel.x + 28, panel.y + 52))
+        subtitle_text = f"Roletar abre 3 ofertas por {STAT_SHOP_ROLL_COST} ponto. Jogar novamente uma oferta custa {STAT_SHOP_REROLL_COST} ponto."
+        self.font_tiny.render_to(self.screen, (panel.x + 28, panel.y + 52), subtitle_text, hex_color(COLORS["muted"]))
 
         if not game.stat_shop_offers:
             self._center_text("Role a loja para revelar tres melhorias permanentes.", self.font, 252, COLORS["text"])
@@ -79,23 +75,20 @@ class ShopMenus:
             border_width = 4 if is_selected else 2
             pygame.draw.rect(self.screen, border_color, rect, width=border_width, border_radius=8)
 
-            title = self.font.render(offer["title"].upper(), True, hex_color(COLORS["text"]))
-            self.screen.blit(title, (rect.x + 18, rect.y + 16))
-            tier = self.font_tiny.render(f"FORCA {offer.get('power', 1)}", True, hex_color(rank_color))
-            self.screen.blit(tier, (rect.right - tier.get_width() - 18, rect.y + 20))
+            self.font.render_to(self.screen, (rect.x + 18, rect.y + 16), offer["title"].upper(), hex_color(COLORS["text"]))
+            tier_text = f"FORCA {offer.get('power', 1)}"
+            t_surf, t_rect = self.font_tiny.render(tier_text, hex_color(rank_color))
+            self.screen.blit(t_surf, (rect.right - t_rect.width - 18, rect.y + 20))
 
             line_y = rect.y + 62
             for effect in offer["effects"]:
-                label = self.font_small.render(effect["label"], True, hex_color(COLORS["text"]))
-                value = self.font_small.render(effect["display"], True, hex_color(COLORS["xp"]))
-                self.screen.blit(label, (rect.x + 18, line_y))
-                self.screen.blit(value, (rect.x + 18, line_y + 24))
+                self.font_small.render_to(self.screen, (rect.x + 18, line_y), effect["label"], hex_color(COLORS["text"]))
+                self.font_small.render_to(self.screen, (rect.x + 18, line_y + 24), effect["display"], hex_color(COLORS["xp"]))
                 line_y += 58
 
             cost = offer["cost"]
             cost_color = COLORS["coin"] if game.inventory.points >= cost else COLORS["danger"]
-            cost_surf = self.font_small.render(f"Custo de compra: {cost} pts", True, hex_color(cost_color))
-            self.screen.blit(cost_surf, (rect.x + 18, rect.bottom - 106))
+            self.font_small.render_to(self.screen, (rect.x + 18, rect.bottom - 106), f"Custo de compra: {cost} pts", hex_color(cost_color))
 
             buy_color = COLORS["xp"] if game.inventory.points >= cost else COLORS["muted_2"]
             buttons.append(self._button(rect.x + 18, rect.bottom - 78, rect.w - 36, 34, f"Comprar ({cost}) - A", f"stat_shop_buy:{index}", mouse_pos, buy_color))
@@ -133,8 +126,8 @@ class ShopMenus:
         
         # Texto de turno destacado
         turn_text = f"VEZ DO JOGADOR {player_index + 1}"
-        turn_surf = self.font_title.render(turn_text, True, turn_color)
-        self.screen.blit(turn_surf, (SCREEN_WIDTH // 2 - turn_surf.get_width() // 2, 210))
+        t_surf, t_rect = self.font_title.render(turn_text, turn_color)
+        self.screen.blit(t_surf, (SCREEN_WIDTH // 2 - t_rect.width // 2, 210))
 
         buttons = []
         y = 254
@@ -160,11 +153,8 @@ class ShopMenus:
             pygame.draw.rect(self.screen, border_color, rect, width=1, border_radius=7)
             
             text_color = (255, 255, 255) if active else hex_color(COLORS["text"])
-            title_surf = self.font_title.render(data["title"], True, text_color)
-            desc_surf = self.font_small.render(data["description"], True, text_color if active else hex_color(COLORS["muted"]))
-            
-            self.screen.blit(title_surf, (rect.x + 24, rect.y + 12))
-            self.screen.blit(desc_surf, (rect.x + 24, rect.y + 47))
+            self.font_title.render_to(self.screen, (rect.x + 24, rect.y + 12), data["title"], text_color)
+            self.font_small.render_to(self.screen, (rect.x + 24, rect.y + 47), data["description"], text_color if active else hex_color(COLORS["muted"]))
             buttons.append((key, rect))
             y += 94
         
@@ -189,15 +179,10 @@ class ShopMenus:
         pygame.draw.rect(self.screen, (8, 14, 25), panel, border_radius=8)
         pygame.draw.rect(self.screen, hex_color(COLORS["special"]), panel, width=2, border_radius=8)
 
-        title = self.font_title.render("GERENCIAMENTO DE SKILLS", True, hex_color(COLORS["text"]))
-        self.screen.blit(title, (panel.x + 28, panel.y + 18))
+        self.font_title.render_to(self.screen, (panel.x + 28, panel.y + 18), "GERENCIAMENTO DE SKILLS", hex_color(COLORS["text"]))
         switch_hint = "  |  Y/P troca jogador" if game.multiplayer else ""
-        subtitle = self.font_tiny.render(
-            f"Jogador {game.menu_player_index + 1}  |  Pontos de item {inv.points}  |  A/X/U/Enter upa skill{switch_hint}",
-            True,
-            hex_color(COLORS["muted"]),
-        )
-        self.screen.blit(subtitle, (panel.x + 28, panel.y + 50))
+        subtitle_text = f"Jogador {game.menu_player_index + 1}  |  Pontos de item {inv.points}  |  A/X/U/Enter upa skill{switch_hint}"
+        self.font_tiny.render_to(self.screen, (panel.x + 28, panel.y + 50), subtitle_text, hex_color(COLORS["muted"]))
         if game.multiplayer:
             other = 2 if game.menu_player_index == 0 else 1
             buttons.append(self._button(panel.right - 228, panel.y + 18, 190, 34, f"Ver Jogador {other}", "toggle_menu_player", mouse_pos, COLORS["special"]))
@@ -226,10 +211,12 @@ class ShopMenus:
 
             state = "ATIVA" if level > 0 else "BLOQUEADA"
             label = f"{skill['short']}  {skill['title']}"
-            self.screen.blit(self.font_tiny.render(label[:42], True, hex_color(COLORS["text"])), (rect.x + 10, rect.y + 4))
-            self.screen.blit(self.font_tiny.render(category.upper(), True, self._skill_category_color(category)), (rect.x + 10, rect.y + 18))
-            lvl = self.font_tiny.render(f"NV {level}/10  {state}", True, hex_color(COLORS["xp"] if level > 0 else COLORS["muted"]))
-            self.screen.blit(lvl, (rect.right - lvl.get_width() - 10, rect.y + 9))
+            self.font_tiny.render_to(self.screen, (rect.x + 10, rect.y + 4), label[:42], hex_color(COLORS["text"]))
+            self.font_tiny.render_to(self.screen, (rect.x + 10, rect.y + 18), category.upper(), self._skill_category_color(category))
+            
+            lvl_text = f"NV {level}/10  {state}"
+            l_surf, l_rect = self.font_tiny.render(lvl_text, hex_color(COLORS["xp"] if level > 0 else COLORS["muted"]))
+            self.screen.blit(l_surf, (rect.right - l_rect.width - 10, rect.y + 9))
             buttons.append((f"skill_select:{index}", rect))
             y += 37
 
@@ -240,24 +227,24 @@ class ShopMenus:
             cost = game.skill_upgrade_cost(selected_key)
             rank_color = self._skill_category_color(category)
 
-            self.screen.blit(self.font_tiny.render(category.upper(), True, rank_color), (detail_rect.x + 22, detail_rect.y + 20))
+            self.font_tiny.render_to(self.screen, (detail_rect.x + 22, detail_rect.y + 20), category.upper(), rank_color)
             y = detail_rect.y + 48
             for line in self._wrap_text(skill["title"], 34)[:2]:
-                self.screen.blit(self.font_title.render(line, True, hex_color(COLORS["text"])), (detail_rect.x + 22, y))
+                self.font_title.render_to(self.screen, (detail_rect.x + 22, y), line, hex_color(COLORS["text"]))
                 y += 30
             y += 8
             state = "Desbloqueada" if level > 0 else "Ainda bloqueada"
-            self.screen.blit(self.font_small.render(f"{state} | Nivel {level}/10", True, hex_color(COLORS["muted"])), (detail_rect.x + 22, y))
+            self.font_small.render_to(self.screen, (detail_rect.x + 22, y), f"{state} | Nivel {level}/10", hex_color(COLORS["muted"]))
             y += 34
             for line in self._wrap_text(skill["description"], 58)[:4]:
-                self.screen.blit(self.font_small.render(line, True, hex_color(COLORS["text"])), (detail_rect.x + 22, y))
+                self.font_small.render_to(self.screen, (detail_rect.x + 22, y), line, hex_color(COLORS["text"]))
                 y += 22
 
             y += 14
             cost_text = f"Custo do proximo upgrade: {cost} pontos"
             if level >= 10:
                 cost_text = "Skill no nivel maximo."
-            self.screen.blit(self.font_small.render(cost_text, True, rank_color), (detail_rect.x + 22, y))
+            self.font_small.render_to(self.screen, (detail_rect.x + 22, y), cost_text, rank_color)
 
             can_upgrade = level < 10 and inv.points >= cost
             button_color = COLORS["xp"] if can_upgrade else COLORS["muted_2"]
@@ -321,10 +308,9 @@ class ShopMenus:
         pygame.draw.rect(self.screen, (179, 147, 74), panel, width=2, border_radius=8)
         pygame.draw.line(self.screen, (64, 52, 34), (panel.left + 22, panel.top + 52), (panel.right - 22, panel.top + 52), 1)
 
-        title = self.font_title.render("CONSTRUCOES", True, hex_color(COLORS["text"]))
-        self.screen.blit(title, (panel.x + 28, panel.y + 16))
-        subtitle = self.font_tiny.render("Itens separados por tier, com arvore de fusao e resultado final.", True, hex_color(COLORS["muted"]))
-        self.screen.blit(subtitle, (panel.x + 236, panel.y + 26))
+        self.font_title.render_to(self.screen, (panel.x + 28, panel.y + 16), "CONSTRUCOES", hex_color(COLORS["text"]))
+        subtitle_text = "Itens separados por tier, com arvore de fusao e resultado final."
+        self.font_tiny.render_to(self.screen, (panel.x + 236, panel.y + 26), subtitle_text, hex_color(COLORS["muted"]))
 
         list_rect = pygame.Rect(panel.x + 26, panel.y + 76, 398, panel.h - 142)
         detail_rect = pygame.Rect(list_rect.right + 24, list_rect.y, panel.right - list_rect.right - 50, list_rect.h)
@@ -337,7 +323,7 @@ class ShopMenus:
         index = 0
         for tier, label in ((1, "TIER 1 - BASE"), (2, "TIER 2 - HIBRIDOS"), (3, "TIER 3 - RELIQUIAS")):
             header_color = self._tier_color(tier)
-            self.screen.blit(self.font_tiny.render(label, True, header_color), (list_rect.x + 14, y))
+            self.font_tiny.render_to(self.screen, (list_rect.x + 14, y), label, header_color)
             y += 19
             for entry in [entry for entry in entries if entry["tier"] == tier]:
                 rect = pygame.Rect(list_rect.x + 12, y, list_rect.w - 24, 18)
@@ -354,7 +340,7 @@ class ShopMenus:
                 self._draw_item_icon(entry["item"], icon_rect, game, show_level=False)
                 name = self._catalog_label(entry["item"])
                 color = hex_color(COLORS["text"] if active or hover else COLORS["muted"])
-                self.screen.blit(self.font_tiny.render(name[:45], True, color), (rect.x + 24, rect.y + 2))
+                self.font_tiny.render_to(self.screen, (rect.x + 24, rect.y + 2), name[:45], color)
                 buttons.append((f"construction_select:{index}", rect))
                 y += 19
                 index += 1
@@ -367,16 +353,16 @@ class ShopMenus:
 
     def _draw_construction_detail(self, game, item, rect):
         rank_label, rank_color = self._rank_title(item)
-        self.screen.blit(self.font_tiny.render(rank_label, True, rank_color), (rect.x + 22, rect.y + 18))
+        self.font_tiny.render_to(self.screen, (rect.x + 22, rect.y + 18), rank_label, rank_color)
 
         y = rect.y + 42
         for line in self._wrap_text(item_display_name(item), 38)[:3]:
-            self.screen.blit(self.font_title.render(line, True, hex_color(COLORS["text"])), (rect.x + 22, y))
+            self.font_title.render_to(self.screen, (rect.x + 22, y), line, hex_color(COLORS["text"]))
             y += 30
 
         y += 4
         for line in self._wrap_text(item_short_description(item), 58)[:3]:
-            self.screen.blit(self.font_small.render(line, True, hex_color(COLORS["muted"])), (rect.x + 24, y))
+            self.font_small.render_to(self.screen, (rect.x + 24, y), line, hex_color(COLORS["muted"]))
             y += 19
 
         tree_rect = pygame.Rect(rect.x + 20, rect.y + 172, rect.w - 40, rect.h - 194)
@@ -385,14 +371,14 @@ class ShopMenus:
     def _draw_build_tree(self, game, item, rect):
         pygame.draw.rect(self.screen, (8, 14, 24), rect, border_radius=6)
         pygame.draw.rect(self.screen, (39, 52, 73), rect, width=1, border_radius=6)
-        self.screen.blit(self.font_tiny.render("ARVORE DE CONSTRUCAO", True, (179, 147, 74)), (rect.x + 12, rect.y + 10))
+        self.font_tiny.render_to(self.screen, (rect.x + 12, rect.y + 10), "ARVORE DE CONSTRUCAO", (179, 147, 74))
 
         if item.rank == 1:
             node = pygame.Rect(rect.centerx - 96, rect.y + 72, 192, 112)
             self._draw_tree_node(item, node, game, selected=True, show_level=False)
             for index, line in enumerate(self._wrap_text("Item base encontrado em caixas especiais e recompensas.", 56)[:2]):
-                surf = self.font_tiny.render(line, True, hex_color(COLORS["muted"]))
-                self.screen.blit(surf, (rect.centerx - surf.get_width() // 2, node.bottom + 20 + index * 16))
+                s_rect = self.font_tiny.get_rect(line)
+                self.font_tiny.render_to(self.screen, (rect.centerx - s_rect.width // 2, node.bottom + 20 + index * 16), line, hex_color(COLORS["muted"]))
             return
 
         if item.rank == 2:
@@ -454,13 +440,12 @@ class ShopMenus:
         lines = self._wrap_text(label, max_chars)[:2]
         y = icon_rect.bottom + 4
         for line in lines:
-            surf = self.font_tiny.render(line, True, hex_color(COLORS["text"]))
-            self.screen.blit(surf, (rect.centerx - surf.get_width() // 2, y))
+            s_rect = self.font_tiny.get_rect(line)
+            self.font_tiny.render_to(self.screen, (rect.centerx - s_rect.width // 2, y), line, hex_color(COLORS["text"]))
             y += 14
 
         if rect.h >= 84:
-            tier_surf = self.font_tiny.render(rank_label.split(" - ")[0], True, rank_color)
-            self.screen.blit(tier_surf, (rect.x + 6, rect.bottom - 16))
+            self.font_tiny.render_to(self.screen, (rect.x + 6, rect.bottom - 16), rank_label.split(" - ")[0], rank_color)
 
     def _catalog_label(self, item):
         if item.is_relic:

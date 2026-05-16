@@ -12,9 +12,13 @@ else:
 class CombatManager:
     def try_dash(self, aim_world, player_index=0):
         player = self.get_player(player_index)
-        if player.dash_cooldown > 0 or player.dash_timer > 0 or self.game_over:
-            return
         if player.is_down:
+            return
+        if self.game_over:
+            return
+        if player.dash_cooldown > 0 or player.dash_timer > 0:
+            remaining = round(player.dash_cooldown, 1)
+            self.add_alert(player.pos, f"Dash: {remaining}s", COLORS["muted"], flash_target="dash")
             return
         # Quest hook: fail survive_no_dash
         if self.quest and self.quest["goal_type"] == "survive_no_dash":
@@ -28,6 +32,7 @@ class CombatManager:
         player.dash_timer = DASH_DURATION
         player.dash_cooldown = self.current_dash_cooldown_for(player)
         player.invulnerable_timer = max(player.invulnerable_timer, DASH_DURATION + 0.08)
+        self.emit_particles(player.pos, count=10, color=P1_AIM_COLOR if player.player_index == 0 else P2_AIM_COLOR, speed=150, lifetime=0.24, size=4)
 
     def try_special(self, aim_world, player_index=0):
         if self.game_over:
@@ -37,7 +42,9 @@ class CombatManager:
             return False
         channel = "ranged" if player.mode == "weapon_1" else "melee"
         if self.special_charge(channel, player_index) < SPECIAL_MAX:
+            charge = int(self.special_charge(channel, player_index))
             self.message = f"J{player_index + 1}: especial da arma atual ainda nao carregou."
+            self.add_alert(player.pos, f"Especial: {charge}/{SPECIAL_MAX}", COLORS["special"], flash_target="special")
             return False
         self._consume_special(channel, player)
         self._cast_weapon_special(channel, aim_world, player)
@@ -51,6 +58,7 @@ class CombatManager:
             return False
         if player.special_ranged < SPECIAL_MAX or player.special_melee < SPECIAL_MAX:
             self.message = f"J{player_index + 1}: combo exige os dois especiais carregados."
+            self.add_alert(player.pos, "Combo: carregue os dois especiais!", COLORS["special"], flash_target="special")
             return False
         player.special_ranged = 0
         player.special_melee = 0
@@ -106,6 +114,7 @@ class CombatManager:
         special_radius = self.special_radius_for(player) * radius_multiplier
         self.special_blast_timer = 0.35
         self.screen_shake = max(self.screen_shake, 16.0)
+        self.emit_particles(player.pos, count=34, color=COLORS["special"], speed=260, lifetime=0.44, size=6)
         if not silent:
             self.message = "Explosao radial liberada!"
 
@@ -156,6 +165,7 @@ class CombatManager:
             "duration": 0.26,
             "color": COLORS["sword"],
         })
+        self.emit_particles(player.pos, count=18, color=COLORS["sword"], speed=210, lifetime=0.30, size=5)
         self.screen_shake = max(self.screen_shake, 12.0)
         if not silent:
             self.message = "Carga Titanica!"
@@ -200,6 +210,7 @@ class CombatManager:
             "duration": 0.32,
             "owner": player.player_index,
         })
+        self.emit_particles(player.pos, count=24, color=COLORS["sword"], speed=190, lifetime=0.38, size=4)
         player.invulnerable_timer = max(player.invulnerable_timer, 0.65)
         self.screen_shake = max(self.screen_shake, 10.0)
         if not silent:
@@ -212,15 +223,19 @@ class CombatManager:
         if player.reload_timer > 0:
             if show_message:
                 self.message = f"J{player.player_index + 1} recarregando: {player.reload_timer:.1f}s."
+                self.add_alert(player.pos, f"Recarregando! ({player.reload_timer:.1f}s)", COLORS["muted"], flash_target="ammo")
             return False
         if player.ammo_magazine > 0:
             return True
         started = self._start_reload_for(player)
         if show_message and not started:
             self.message = f"J{player.player_index + 1} sem municao: lute corpo a corpo e colete cartuchos."
+            self.add_alert(player.pos, "Sem balas! Colete cartuchos.", COLORS["danger"], flash_target="ammo")
         elif show_message:
             self.message = f"J{player.player_index + 1}: pente vazio, recarregando."
+            self.add_alert(player.pos, "Pente vazio! Recarregando...", COLORS["coin"], flash_target="ammo")
         return False
+
 
     def _start_forced_reload(self, show_message=True):
         player = self.player
@@ -777,6 +792,7 @@ class CombatManager:
             "age": 0.0,
             "duration": 0.32,
         })
+        self.emit_particles(trigger_pos, count=26, color=COLORS["coin"], speed=240, lifetime=0.42, size=5)
         self.screen_shake = max(self.screen_shake, 12.0)
         self.message = "Mina terrestre detonada."
 
@@ -789,6 +805,7 @@ class CombatManager:
                         break
         enemy.health -= amount
         enemy.hit_flash = 0.08
+        self.emit_particles(enemy.pos, count=3, color="#DC2626", speed=80, size=3)
         if amount >= 1:
             self.add_floater(enemy.pos, str(int(amount)), "#FDE68A" if source == "sword" else "#BAE6FD")
         if enemy.health <= 0 and enemy in self.enemies:
@@ -798,6 +815,7 @@ class CombatManager:
         self.enemies.remove(enemy)
         killer = self.get_player(killer_index)
         killer.kills += 1
+        self.emit_particles(enemy.pos, count=15, color="#991B1B", speed=120, size=5)
         killer.score += int(enemy.xp_value * 10 + self.time_alive)
 
         # Quest hooks (team-based)

@@ -133,16 +133,24 @@ Todo o comportamento de jogabilidade (movimento, dash, troca de arma, spawn, IA,
 - **settings.json** – Resolução, fullscreen, volume, idioma.
 - **balance.json** – Valores de balance (HP, dano, velocidade, taxas de drop) que podem sobrescrever `data.constants`.
 - **keybinds.json** – Mapeamento de teclas e botões de gamepad.
+- **config_loader.py** - Loader JSON resiliente para settings, balance e keybinds.
+- **runtime.py** - Fallbacks para dependencias opcionais e logging.
 
-> *Os arquivos ainda não existem fisicamente; a estrutura está prevista para permitir ajustes sem recompilar.
+> Os arquivos JSON ja existem fisicamente e sao carregados com fallback seguro.
 
 ### Detalhamento de Funções
-- `config_loader.load_json(path)` : (futuro) lerá o JSON e retornará dicionário.
-- `data.constants` pode ser sobrescrito por `config_loader` na inicialização.
+- `config_loader.load_json_config(filename)` retorna dicionario ou fallback vazio quando o JSON esta ausente/invalido.
+- `config_loader.apply_overrides(globals, overrides)` aplica apenas chaves existentes e tipos compativeis.
+- `runtime.optional_import(name)` carrega bibliotecas externas sem quebrar o import do jogo.
+- `runtime.configure_file_logging()` usa `loguru` quando disponivel e `logging` nativo como fallback.
+- `data.constants` aplica `settings.json` (`SCREEN_WIDTH`, `SCREEN_HEIGHT`, `FPS`) e `balance.json` na inicializacao.
+- `input.input_manager` aplica `keybinds.json` preservando defaults quando uma entrada e invalida.
 
 ### Arquitetura de Interação
-- `main.py` (ou `core.game_logic.__init__`) chamará `config_loader` para aplicar configurações antes de criar a janela Pygame.
-- Nenhum outro módulo depende diretamente de `config/`.
+- `main.py` chama `load_settings()` para fullscreen inicial antes do loop.
+- `data.constants` chama `config_loader` para settings/balance.
+- `input.input_manager` chama `config_loader` para keybinds.
+- `core.world`, `core.game_logic` e `presentation` usam `runtime` para dependencias opcionais.
 
 ### Lógica de Gameplay
 - As **configurações externas** permitem mudar resolução, volume e keybinds sem tocar no código Python, facilitando testes de performance e acessibilidade.
@@ -154,14 +162,18 @@ Todo o comportamento de jogabilidade (movimento, dash, troca de arma, spawn, IA,
 ### Mapeamento de Arquivos
 - **profiler.py** – Script de profiling (cProfile) para medir FPS, tempo de update/render e identificar gargalos.
 - **balance_editor.py** – Interface (CLI/GUI) para editar `balance.json` e gerar snapshots de `constants_backup.py`.
+- **config_check.py** - Valida JSONs, keybinds e disponibilidade das dependencias recomendadas/opcionais.
+- **smoke_test.py** - Inicializa o jogo em modo headless por alguns segundos e fecha por evento `QUIT`.
 
 ### Detalhamento de Funções
-- `profiler.run(target_module)` : executa o módulo especificado e salva relatório `profiler_report.txt`.
-- `balance_editor.edit(key, value)` : atualiza o JSON e opcionalmente cria um backup.
+- `profiler.py --mode core|ui` roda cenarios controlados e salva `tools/profiler_report*.txt`.
+- `balance_editor.py list|get|set` atualiza `config/balance.json` e pode gerar `balance.json.bak`.
+- `config_check.py` deve ser usado antes de builds/testes para confirmar configuracao carregavel.
+- `smoke_test.py` valida o loop principal sem abrir janela real.
 
 ### Arquitetura de Interação
 - Ferramentas são *stand‑alone*; não são importadas pelo jogo.
-- `balance_editor` gera o arquivo `constants_backup.py` que já está versionado no repositório.
+- `balance_editor` altera apenas `config/balance.json`; os overrides sao aplicados no proximo import de `data.constants`.
 
 ### Lógica de Gameplay
 - Não interferem na gameplay; servem ao desenvolvedor para otimização e balanceamento.

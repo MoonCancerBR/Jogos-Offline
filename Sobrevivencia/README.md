@@ -26,3 +26,31 @@ Jogo de ação top-down survival / bullet heaven tático, desenvolvido em **Pyth
 ```bash
 python -m Sobrevivencia.main
 ```
+
+## Instalação
+
+Perfil minimo:
+
+```bash
+python -m pip install -r requirements-minimal.txt
+```
+
+Perfil completo de desenvolvimento:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+## Validação
+
+```bash
+python -m Sobrevivencia.tools.config_check
+python -m Sobrevivencia.tools.smoke_test
+python -m Sobrevivencia.tools.profiler --mode core --seconds 1
+```
+
+## Configuração Externa
+
+- `config/settings.json`: resolução, FPS, fullscreen inicial e volumes.
+- `config/balance.json`: overrides de constantes de balance.
+- `config/keybinds.json`: atalhos iniciais de teclado/mouse.

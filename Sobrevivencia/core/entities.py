@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 from pygame.math import Vector2
 
@@ -125,6 +126,10 @@ class Player:
     player_index: int = 0
     is_down: bool = False
     revive_progress: float = 0.0
+    
+    # Physics
+    body: Any = field(default=None, init=False)
+    shape: Any = field(default=None, init=False)
 
     def __post_init__(self):
         if self.char_class in CHARACTERS:
@@ -198,6 +203,10 @@ class Enemy:
     phase: float = 0
     special_timer: float = 0
     summon_cooldown: float = 0.0
+    
+    # Physics
+    body: Any = field(default=None, init=False)
+    shape: Any = field(default=None, init=False)
     enraged: bool = False
     action: str = ""
     action_timer: float = 0

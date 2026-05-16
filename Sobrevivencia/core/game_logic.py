@@ -4,16 +4,19 @@ import random
 from pygame.math import Vector2
 
 if __package__:
+    from ..config.runtime import optional_import
     from ..data.constants import *
     from .entities import Drop, Enemy, Player, Projectile, Slash
     from ..data.items import Inventory, item_display_name, RELIC_DEFINITIONS
     from .world import World, circle_rect_overlap
 else:
+    from Sobrevivencia.config.runtime import optional_import
     from Sobrevivencia.data.constants import *
     from Sobrevivencia.core.entities import Drop, Enemy, Player, Projectile, Slash
     from Sobrevivencia.data.items import Inventory, item_display_name, RELIC_DEFINITIONS
     from Sobrevivencia.core.world import World, circle_rect_overlap
 
+pymunk = optional_import("pymunk")
 
 
 
@@ -77,6 +80,7 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
         self.special_blast_timer = 0.0
         self.special_box_timer = 12.0
         self.item_events = []
+        self.particle_events = []
         self.message = "Sobreviva o maximo que puder."
         self.random = random.Random()
         self.chromatic_spawn_timer = self.random.uniform(CHROMATIC_SPAWN_MIN, CHROMATIC_SPAWN_MAX)
@@ -97,8 +101,101 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
         self.relic_aura_angle = 0.0
         self.camera_zoom = 1.0
 
+        # Physics Space. Pymunk is optional; the World collision fallback keeps the game playable.
+        self.space = pymunk.Space() if pymunk is not None else None
+        if self.space is not None:
+            self.space.gravity = (0, 0)
+        self.physics_chunks = set()
+
+        # Collision Types
+        self.COLLISION_TYPE_PLAYER = 1
+        self.COLLISION_TYPE_ENEMY = 2
+        self.COLLISION_TYPE_WALL = 3
+
+        # Setup Players Physics
+        for p in self.players:
+            self._setup_physics_entity(p, is_player=True)
+
     def restart(self):
         self.__init__(self.char_class, self.char_class_2, self.multiplayer)
+
+    def _setup_physics_entity(self, entity, is_player=False):
+        if self.space is None or pymunk is None:
+            entity.body = None
+            entity.shape = None
+            return
+        mass = 1
+        moment = pymunk.moment_for_circle(mass, 0, entity.radius)
+        body = pymunk.Body(mass, moment)
+        body.position = entity.pos.x, entity.pos.y
+        shape = pymunk.Circle(body, entity.radius)
+        shape.elasticity = 0.5
+        shape.friction = 0.5
+
+        if is_player:
+            shape.collision_type = self.COLLISION_TYPE_PLAYER
+        else:
+            shape.collision_type = self.COLLISION_TYPE_ENEMY
+
+        self.space.add(body, shape)
+        entity.body = body
+        entity.shape = shape
+
+    def _cleanup_physics_entity(self, entity):
+        if entity.body and entity.shape:
+            try:
+                if self.space is not None:
+                    self.space.remove(entity.body, entity.shape)
+            except:
+                pass
+            entity.body = None
+            entity.shape = None
+
+    def _add_static_obstacle(self, rect):
+        if self.space is None or pymunk is None:
+            return
+        body = pymunk.Body(body_type=pymunk.Body.STATIC)
+        body.position = rect.center.x, rect.center.y
+        shape = pymunk.Poly.create_box(body, (rect.w, rect.h))
+        shape.friction = 0.5
+        shape.elasticity = 0.2
+        shape.collision_type = self.COLLISION_TYPE_WALL
+        self.space.add(body, shape)
+
+    def _sync_world_to_physics(self):
+        if self.space is None:
+            return
+        focus = self.camera_focus
+        cx, cy = self.world.chunk_coords(focus.x, focus.y)
+        for oy in range(-2, 3):
+            for ox in range(-2, 3):
+                key = (cx + ox, cy + oy)
+                if key not in self.physics_chunks:
+                    chunk = self.world.ensure_chunk(key[0], key[1])
+                    for rect in chunk["obstacles"]:
+                        # Pymunk box position is center
+                        self._add_static_obstacle(rect)
+                    self.physics_chunks.add(key)
+
+    def _sync_physics_to_entities(self):
+        if self.space is None:
+            return
+        for p in self.players:
+            if p.body and not p.is_down:
+                p.pos = Vector2(p.body.position.x, p.body.position.y)
+        for e in self.enemies:
+            if e.body:
+                e.pos = Vector2(e.body.position.x, e.body.position.y)
+
+    def emit_particles(self, pos, count=10, color="#FFFFFF", speed=50, lifetime=0.5, size=4):
+        self.particle_events.append({
+            "pos": Vector2(pos),
+            "count": count,
+            "color": color,
+            "speed": speed,
+            "lifetime": lifetime,
+            "size": size
+        })
 
     def get_player(self, index=0):
         if index == 1 and self.player2 is not None:
@@ -243,6 +340,12 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
         self.screen_shake = max(0, self.screen_shake - SCREEN_SHAKE_DECAY * 20 * dt)
         self.special_blast_timer = max(0, self.special_blast_timer - dt)
 
+        # Physics step
+        if self.space is not None:
+            self._sync_world_to_physics()
+            self.space.step(dt)
+            self._sync_physics_to_entities()
+
         # --- Multiplayer: tethering and revive ---
         if self.multiplayer and self.player2 is not None:
             self._update_tethering()
@@ -315,13 +418,16 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
             player.last_move_dir = Vector2(move_vector)
 
         if player.dash_timer > 0:
-            delta = player.dash_dir * DASH_SPEED * dt
+            velocity = player.dash_dir * DASH_SPEED
         else:
             terrain_speed = self.world.speed_multiplier_at(player.pos.x, player.pos.y)
             speed = player.base_speed * self.effective_speed_multiplier_for(player) * terrain_speed
-            delta = move_vector * speed * dt
+            velocity = move_vector * speed
 
-        player.pos = self.world.move_circle(player.pos, player.radius, delta)
+        player.pos = self.world.move_circle(player.pos, player.radius, velocity * dt)
+        if player.body:
+            player.body.position = player.pos.x, player.pos.y
+            player.body.velocity = 0, 0
         if player.shield_timer > 0:
             self._repel_enemies(dt, player)
 

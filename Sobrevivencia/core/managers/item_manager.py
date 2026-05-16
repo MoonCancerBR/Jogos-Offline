@@ -750,6 +750,27 @@ class ItemManager:
                 "color": color,
                 "age": 0.0,
                 "duration": 0.55,
+                "type": "damage",
+            }
+        )
+
+    def add_alert(self, pos, text, color=None, flash_target=None):
+        """Alerta rápido de ação bloqueada (0.5s, sobe mais, fonte maior)."""
+        if color is None:
+            color = COLORS["danger"]
+        # Evita spam: ignora se já há alerta igual recente
+        for f in self.floaters[-6:]:
+            if f.get("type") == "alert" and f["text"] == text and f["age"] < 0.2:
+                return
+        self.floaters.append(
+            {
+                "pos": Vector2(pos),
+                "text": text,
+                "color": color,
+                "age": 0.0,
+                "duration": 0.65,
+                "type": "alert",
+                "flash_target": flash_target,
             }
         )
 

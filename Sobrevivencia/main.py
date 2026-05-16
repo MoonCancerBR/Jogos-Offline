@@ -1,12 +1,21 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import pygame
+import pygame.freetype
 from pygame.math import Vector2
 
 if __package__:
+    from .config.config_loader import load_settings
+    from .config.runtime import configure_file_logging, logger
     from .data.constants import *
     from .data.items import BASE_ITEM_KEYS
     from .core.game_logic import GameLogic
     from .presentation.ui import UI
 else:
+    from Sobrevivencia.config.config_loader import load_settings
+    from Sobrevivencia.config.runtime import configure_file_logging, logger
     from Sobrevivencia.data.constants import *
     from Sobrevivencia.data.items import BASE_ITEM_KEYS
     from Sobrevivencia.core.game_logic import GameLogic
@@ -16,21 +25,85 @@ else:
 if __package__:
     from .input.input_manager import InputManager
     from .controllers.menu_controller import MenuController
+    from .presentation.menu_manager import MenuManager
+
 else:
     from Sobrevivencia.input.input_manager import InputManager
     from Sobrevivencia.controllers.menu_controller import MenuController
+    from Sobrevivencia.presentation.menu_manager import MenuManager
+
 
 class SobrevivenciaGame(InputManager, MenuController):
     def run(self):
+        settings = load_settings()
         pygame.init()
+        pygame.font.init()
+        pygame.freetype.init()
         pygame.joystick.init()
+
+        configure_file_logging("game.log", level="INFO")
+        logger.info("Sistema inicializado. Iniciando SobrevivenciaGame...")
         pygame.display.set_caption("Sobrevivencia - Top Down Survival")
-        screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        fullscreen = bool(settings.get("fullscreen", False))
+        screen, fullscreen = self._set_display_mode(fullscreen, None)
         clock = pygame.time.Clock()
         ui = UI(screen)
+        menu_manager = MenuManager(screen)
+
+        # Menu Callbacks
+        def on_start_click():
+            nonlocal state, character_selected, character_selected_2, character_select_player, multiplayer_selected, character_cancel_state
+            state = "mode_select" if self._joystick_count() else "character_select"
+            character_selected = 0
+            character_selected_2 = 0
+            character_select_player = 0
+            multiplayer_selected = False
+            character_cancel_state = "start"
+
+        def on_commands_click():
+            nonlocal state, commands_return_state
+            commands_return_state = "start"
+            state = "commands"
+
+        def on_settings_click():
+            nonlocal state, settings_return_state, capture_binding
+            settings_return_state = "start"
+            state = "settings"
+            capture_binding = None
+
+        def on_quit_click():
+            nonlocal running
+            running = False
+
+        menu_manager.create_start_menu(on_start_click, on_commands_click, on_settings_click, on_quit_click)
+
+        def on_resume_click():
+            nonlocal state
+            state = "playing"
+
+        def on_inventory_click():
+            nonlocal state, inventory_selected, game
+            game.menu_player_index = 0
+            state = "inventory"
+            inventory_selected = min(inventory_selected, max(0, len(game.get_inventory(0).item_list()) - 1))
+
+        def on_skills_click():
+            nonlocal state, skill_selected, game, skills_return_state
+            game.menu_player_index = 0
+            skills_return_state = "paused"
+            state = "skills"
+            skill_selected = min(skill_selected, max(0, len(game.get_player(0).passives) - 1))
+
+        def on_stat_shop_click():
+            nonlocal state, stat_shop_selected, stat_shop_return_state
+            stat_shop_return_state = "paused"
+            state = "stat_shop"
+            stat_shop_selected = 0
+
+        menu_manager.create_pause_menu(on_resume_click, on_inventory_click, on_skills_click, on_stat_shop_click, on_settings_click, on_quit_click)
+
         game = GameLogic()
         controls = self._default_bindings()
-        fullscreen = False
         self._event_pressed_bindings = []
         self._event_released_bindings = []
         self._joystick_axis_active = {}
@@ -84,11 +157,16 @@ class SobrevivenciaGame(InputManager, MenuController):
         # Virtual Screen para Smoothscale Fullscreen
         self.virtual_screen = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         ui.screen = self.virtual_screen
+        menu_manager.screen = self.virtual_screen
         self.active_device = "keyboard" # "keyboard" ou "joystick"
         self.control_preference = "auto" # "auto", "keyboard", "joystick"
 
         while running:
             dt = clock.tick(FPS) / 1000.0
+            if state == "start" and pygame.time.get_ticks() < 5000:
+                # Print once every second for 5 seconds
+                if pygame.time.get_ticks() % 1000 < 20:
+                    logger.info(f"Loop running... State: {state}")
             
             final_screen = pygame.display.get_surface()
             raw_mouse_pos = pygame.mouse.get_pos()
@@ -113,9 +191,18 @@ class SobrevivenciaGame(InputManager, MenuController):
 
             for event in self._poll_events(game):
                 self._prepare_input_event(event)
+                ui.gui_manager.process_events(event)
+                if state == "inventory":
+                    ui.handle_inventory_event(event)
+
                 if event.type == pygame.QUIT:
                     return_action = "menu"
                     running = False
+                    break
+
+                if state in ("start", "paused"):
+                    menu_manager.update([event])
+                    continue
 
                 elif event.type == pygame.JOYDEVICEADDED:
                     self._add_joystick(event.device_index)
@@ -1287,10 +1374,14 @@ class SobrevivenciaGame(InputManager, MenuController):
                 elif game.game_over:
                     state = "game_over"
                     game_over_selected = 0
-                ui.render_game(game, aim_pos, flip=False, aim_from_joystick=aim_mode == "joystick", p2_aim_pos=p2_aim_screen)
+                ui.render_game(game, aim_pos, dt=dt, flip=False, aim_from_joystick=aim_mode == "joystick", p2_aim_pos=p2_aim_screen)
                 button_rects = []
             elif state == "start":
-                button_rects = ui.render_start(mouse_pos, start_selected)
+                self.virtual_screen.fill(COLORS["bg"])
+                ui._draw_menu_background()
+                menu_manager.set_active('start')
+                menu_manager.draw()
+                button_rects = []
             elif state == "mode_select":
                 button_rects = ui.render_mode_select(mouse_pos, mode_selected, self._joystick_count())
             elif state == "character_select":
@@ -1305,7 +1396,10 @@ class SobrevivenciaGame(InputManager, MenuController):
                     character_select_player,
                 )
             elif state == "paused":
-                button_rects = ui.render_pause(game, PAUSE_OPTIONS, pause_selected, mouse_pos)
+                ui.render_game(game, aim_pos, dt=dt, flip=False)
+                menu_manager.set_active('pause')
+                menu_manager.draw()
+                button_rects = []
             elif state == "commands":
                 button_rects = ui.render_commands(mouse_pos, self._command_lines(controls))
             elif state == "settings":
@@ -1358,7 +1452,8 @@ class SobrevivenciaGame(InputManager, MenuController):
                 final_screen.blit(self.virtual_screen, (0, 0))
             pygame.display.flip()
 
-        pygame.quit()
+        pygame.display.quit()
+        pygame.joystick.quit()
         return return_action
 
 

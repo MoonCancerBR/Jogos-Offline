@@ -4,34 +4,58 @@ import random
 from pygame.math import Vector2
 
 if __package__:
+    from ..config.runtime import njit_or_python as njit, optional_import
     from ..data.constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
     from .entities import Destructible, Hazard, RectBody
 else:
+    from Sobrevivencia.config.runtime import njit_or_python as njit, optional_import
     from Sobrevivencia.data.constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
     from Sobrevivencia.core.entities import Destructible, Hazard, RectBody
 
+pytmx = optional_import("pytmx")
 
+
+@njit
 def stable_hash(x, y, salt=0):
     value = (x * 374761393 + y * 668265263 + salt * 362437) & 0xFFFFFFFF
     value = ((value ^ (value >> 13)) * 1274126177) & 0xFFFFFFFF
     return (value ^ (value >> 16)) & 0xFFFFFFFF
 
 
+@njit
 def unit_hash(x, y, salt=0):
     return stable_hash(x, y, salt) / 0xFFFFFFFF
 
 
-def circle_rect_overlap(cx, cy, radius, rect):
-    nearest_x = max(rect.left, min(cx, rect.right))
-    nearest_y = max(rect.top, min(cy, rect.bottom))
+@njit
+def _circle_rect_overlap_math(cx, cy, radius, rect_left, rect_top, rect_right, rect_bottom):
+    nearest_x = max(rect_left, min(cx, rect_right))
+    nearest_y = max(rect_top, min(cy, rect_bottom))
     dx = cx - nearest_x
     dy = cy - nearest_y
     return dx * dx + dy * dy <= radius * radius
 
 
+def circle_rect_overlap(cx, cy, radius, rect):
+    return _circle_rect_overlap_math(cx, cy, radius, rect.left, rect.top, rect.right, rect.bottom)
+
+
 class World:
     def __init__(self):
         self.chunks = {}
+        self.tmx_data = None
+        self.use_tmx = False
+
+    def load_tmx(self, filename):
+        if pytmx is None:
+            return False
+        try:
+            self.tmx_data = pytmx.load_pygame(filename, pixelalpha=True)
+            self.use_tmx = True
+            return True
+        except Exception as e:
+            print(f"Erro ao carregar TMX: {e}")
+            return False
 
     def chunk_coords(self, x, y):
         return math.floor(x / CHUNK_SIZE), math.floor(y / CHUNK_SIZE)

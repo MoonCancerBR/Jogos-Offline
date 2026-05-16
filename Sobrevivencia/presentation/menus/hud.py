@@ -1,5 +1,6 @@
 import pygame
 from pygame.math import Vector2
+
 if __package__:
     from ...data.constants import *
     from ...data.items import BASE_ITEM_KEYS, ITEM_DEFINITIONS, InventoryItem, MAX_ACTIVE_ITEMS, MAX_ITEM_LEVEL, item_display_name, item_short_description, RELIC_DEFINITIONS
@@ -9,301 +10,710 @@ else:
     from Sobrevivencia.data.items import BASE_ITEM_KEYS, ITEM_DEFINITIONS, InventoryItem, MAX_ACTIVE_ITEMS, MAX_ITEM_LEVEL, item_display_name, item_short_description, RELIC_DEFINITIONS
     from Sobrevivencia.presentation.ui_utils import hex_color
 
+
+BASE_SCREEN_W = 1100
+BASE_SCREEN_H = 720
+
+HUD_TOP_H = 126
+HUD_MARGIN = 10
+
+PANEL_W_SINGLE_MIN = 650
+PANEL_W_SINGLE_MAX = 770
+SIDE_PANEL_W_SINGLE = 300
+PANEL_W = 350
+PANEL_W_COMPACT = 330
+PANEL_H = 110
+PANEL_H_COMPACT = 108
+PANEL_PAD = 10
+
+BAR_H_HP = 17
+BAR_H_THIN = 9
+SLOT_ITEM = 22
+SLOT_GAP = 4
+
+QUEST_PANEL_W = 270
+STATS_PANEL_W = 220
+
+
 class HudMenu:
+    def _hud_scale(self):
+        return max(0.82, min(1.15, min(SCREEN_WIDTH / BASE_SCREEN_W, SCREEN_HEIGHT / BASE_SCREEN_H)))
+
+    def _s(self, value):
+        return max(1, int(round(value * self._hud_scale())))
+
+    def _top_h(self):
+        return self._s(HUD_TOP_H)
+
+    def _player_panel_size(self, compact=False):
+        w = PANEL_W_COMPACT if compact else PANEL_W
+        h = PANEL_H_COMPACT if compact else PANEL_H
+        return self._s(w), self._s(h)
+
+    def _fit_text(self, font, text, max_width):
+        text = str(text)
+        if max_width <= 0 or font.get_rect(text).width <= max_width:
+            return text
+
+        suffix = "..."
+        limit = max(0, max_width - font.get_rect(suffix).width)
+        if limit <= 0:
+            return suffix
+
+        trimmed = text
+        while trimmed and font.get_rect(trimmed).width > limit:
+            trimmed = trimmed[:-1]
+        return trimmed.rstrip() + suffix
+
+    def _render_fit(self, font, text, pos, color, max_width):
+        font.render_to(self.screen, pos, self._fit_text(font, text, max_width), color)
+
+    def _wrap_lines(self, font, text, max_width, max_lines):
+        words = str(text).split()
+        if not words:
+            return [""]
+
+        lines = []
+        current = ""
+        for word in words:
+            candidate = word if not current else f"{current} {word}"
+            if font.get_rect(candidate).width <= max_width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+            current = word
+            if len(lines) == max_lines:
+                break
+
+        if len(lines) < max_lines and current:
+            lines.append(current)
+
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+
+        if words and len(lines) == max_lines:
+            used_text = " ".join(lines)
+            original = " ".join(words)
+            if len(used_text) < len(original):
+                lines[-1] = self._fit_text(font, lines[-1], max_width)
+
+        return lines
+
+    def _draw_panel_back(self, rect, alpha=220, border=(51, 65, 85), radius=6):
+        overlay = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(overlay, (16, 25, 40, alpha), overlay.get_rect(), border_radius=self._s(radius))
+        self.screen.blit(overlay, rect.topleft)
+        pygame.draw.rect(self.screen, border, rect, width=1, border_radius=self._s(radius))
+
+    def _draw_hud_backdrop(self, height):
+        pygame.draw.rect(self.screen, hex_color(COLORS["panel"]), (0, 0, SCREEN_WIDTH, height))
+        pygame.draw.line(self.screen, (30, 41, 59), (0, height), (SCREEN_WIDTH, height), self._s(2))
+
     def _draw_hud(self, game):
         if game.multiplayer and len(game.players) > 1:
             self._draw_coop_hud(game)
             return
+
         player = game.player
-        pygame.draw.rect(self.screen, hex_color(COLORS["panel"]), (0, 0, SCREEN_WIDTH, 76))
-        pygame.draw.line(self.screen, (30, 41, 59), (0, 76), (SCREEN_WIDTH, 76), 2)
+        inv = game.inventory
+        margin = self._s(HUD_MARGIN)
+        hud_h = self._top_h()
 
-        self._bar(24, 18, 250, 16, player.health / player.max_health, COLORS["health"], COLORS["health_bg"], "VIDA")
-        self._bar(24, 45, 250, 12, player.xp / player.xp_to_next, COLORS["xp"], "#15361F", f"NV {player.level}")
-        self._bar(304, 12, 136, 12, player.special_ranged / SPECIAL_MAX, COLORS["special"], "#0B2C3C", "ESP DIST")
-        self._bar(304, 31, 136, 12, player.special_melee / SPECIAL_MAX, COLORS["sword"], "#3A2A08", "ESP MELEE")
+        self._draw_hud_backdrop(hud_h)
 
-        # Aviso pulsante quando ambas as barras estão cheias
+        side_w = min(self._s(SIDE_PANEL_W_SINGLE), max(self._s(238), SCREEN_WIDTH // 3))
+        panel_w = min(
+            self._s(PANEL_W_SINGLE_MAX),
+            max(self._s(PANEL_W_SINGLE_MIN), SCREEN_WIDTH - side_w - margin * 3),
+        )
+        player_rect = self._draw_player_panel(
+            game,
+            player,
+            inv,
+            x=margin + self._s(4),
+            y=self._s(8),
+            compact=False,
+            expanded=True,
+            width=panel_w,
+        )
+        side_x = player_rect.right + self._s(14)
+        side_w = max(self._s(230), SCREEN_WIDTH - side_x - margin - self._s(4))
+        self._draw_metric_strip(
+            side_x,
+            self._s(12),
+            side_w,
+            [
+                ("Abates", player.kills, COLORS["text"]),
+                ("Moedas", player.coins, COLORS["coin"]),
+                ("Pts", player.score, COLORS["upgrade"]),
+            ],
+        )
+        self._draw_message(game.message, side_x, self._s(49), side_w)
+        self._draw_quest_panel(game, x=side_x, y=self._s(72), w=side_w, compact=True)
+        stats_rect = self._draw_stats_panel(game, y=hud_h + self._s(8), compact=True)
+        self._draw_buff_list(player, SCREEN_WIDTH - margin, stats_rect.bottom + self._s(8), align_right=True)
+
+    def _draw_coop_hud(self, game):
+        margin = self._s(HUD_MARGIN)
+        hud_h = self._top_h()
+        panel_w, _ = self._player_panel_size(compact=True)
+
+        self._draw_hud_backdrop(hud_h)
+
+        left_rect = self._draw_player_panel(game, game.player, game.get_inventory(0), x=margin, y=self._s(8), compact=True)
+        right_x = SCREEN_WIDTH - panel_w - margin
+        right_rect = self._draw_player_panel(game, game.player2, game.get_inventory(1), x=right_x, y=self._s(8), compact=True, flip=True)
+
+        center_x = left_rect.right + self._s(12)
+        center_w = max(self._s(180), right_rect.left - center_x - self._s(12))
+        kills = " / ".join(f"J{p.player_index + 1} {p.kills}" for p in game.players)
+        score = sum(p.score for p in game.players)
+        self._draw_metric_strip(
+            center_x,
+            self._s(10),
+            center_w,
+            [
+                ("Abates", kills, COLORS["text"]),
+                ("Moedas", game.shared_coins, COLORS["coin"]),
+                ("Pts", score, COLORS["upgrade"]),
+            ],
+            compact=True,
+        )
+
+        self._draw_message(game.message, center_x, self._s(42), center_w, centered=True)
+
+        if game.level_up_pending:
+            turn = f"Turno do Jogador {game.level_up_player_index + 1}"
+            surf, rect = self.font_tiny.render(self._fit_text(self.font_tiny, turn, center_w), hex_color(COLORS["upgrade"]))
+            self.screen.blit(surf, (center_x + center_w // 2 - rect.width // 2, self._s(60)))
+
+        self._draw_quest_panel(game, x=center_x, y=self._s(76), w=center_w, compact=True)
+        left_stats, right_stats = self._draw_coop_stats_panels(game)
+        self._draw_buff_list(game.player, margin, left_stats.bottom + self._s(8), align_right=False)
+        if getattr(game, "player2", None):
+            self._draw_buff_list(game.player2, SCREEN_WIDTH - margin, right_stats.bottom + self._s(8), align_right=True)
+
+    def _draw_metric_strip(self, x, y, w, entries, compact=False):
+        if w <= 0:
+            return
+
+        gap = self._s(6 if compact else 8)
+        count = max(1, len(entries))
+        cell_w = max(self._s(42), (w - gap * (count - 1)) // count)
+        cell_h = self._s(28 if compact else 32)
+
+        for index, (label, value, color_key) in enumerate(entries):
+            rect = pygame.Rect(x + index * (cell_w + gap), y, cell_w, cell_h)
+            self._draw_panel_back(rect, alpha=150, border=(39, 52, 73), radius=5)
+
+            label_text = self._fit_text(self.font_tiny, str(label).upper(), rect.width - self._s(12))
+            value_text = self._fit_text(self.font_small if not compact else self.font_tiny, str(value), rect.width - self._s(12))
+            self.font_tiny.render_to(self.screen, (rect.x + self._s(6), rect.y + self._s(3)), label_text, hex_color(COLORS["muted"]))
+            value_font = self.font_small if not compact else self.font_tiny
+            value_y = rect.y + self._s(14 if not compact else 15)
+            value_font.render_to(self.screen, (rect.x + self._s(6), value_y), value_text, hex_color(color_key))
+
+    def _draw_message(self, message, x, y, w, centered=False):
+        msg = self._fit_text(self.font_tiny, message, w)
+        surf, rect = self.font_tiny.render(msg, hex_color(COLORS["muted"]))
+        draw_x = x + w // 2 - rect.width // 2 if centered else x
+        self.screen.blit(surf, (draw_x, y))
+
+    def _draw_player_panel(self, game, player, inv, x, y, compact=False, flip=False, expanded=False, width=None):
+        if expanded:
+            return self._draw_player_panel_expanded(game, player, inv, x, y, width=width)
+
+        w, h = self._player_panel_size(compact)
+        pad = self._s(PANEL_PAD)
+        rect = pygame.Rect(x, y, w, h)
+        title_color = P2_AIM_COLOR if player.player_index == 1 else P1_AIM_COLOR
+
+        self._draw_panel_back(rect, alpha=178, border=hex_color(title_color), radius=7)
+
+        char_name = CHARACTERS[player.char_class]["name"]
+        status = "CAIDO" if player.is_down else f"NV {player.level}"
+        title = f"J{player.player_index + 1} - {char_name} [{status}]"
+        self._render_fit(self.font_small, title.upper(), (x + pad, y + self._s(5)), hex_color(title_color), w - pad * 2)
+
+        content_y = y + self._s(27)
+        right_w = self._s(118 if not compact else 112)
+        gap = self._s(9)
+        left_w = max(self._s(160), w - pad * 2 - right_w - gap)
+        right_x = x + w - pad - right_w
+
+        h_smooth = self.animation_manager.get_tween(
+            f"p{player.player_index}_hp",
+            player.health / max(1, player.max_health),
+        )
+        h_smooth.set_target(player.health / max(1, player.max_health))
+        hp_label = f"VIDA {int(player.health)}/{int(player.max_health)}"
+        self._bar(x + pad, content_y, left_w, self._s(BAR_H_HP), h_smooth.current, COLORS["health"], COLORS["health_bg"], hp_label)
+
+        cy = content_y + self._s(BAR_H_HP + 4)
+        if not compact:
+            xp_f = player.xp / max(1, player.xp_to_next)
+            xp_lbl = f"XP NV {player.level}"
+            xp_smooth = self.animation_manager.get_tween(f"p{player.player_index}_xp", xp_f)
+            xp_smooth.set_target(xp_f)
+            self._bar(x + pad, cy, left_w, self._s(BAR_H_THIN), xp_smooth.current, COLORS["xp"], "#15361F", xp_lbl)
+            cy += self._s(BAR_H_THIN + 4)
+
+        bar_w2 = max(self._s(44), (left_w - self._s(4)) // 2)
+        sr_smooth = self.animation_manager.get_tween(
+            f"p{player.player_index}_sr",
+            player.special_ranged / SPECIAL_MAX,
+        )
+        sr_smooth.set_target(player.special_ranged / SPECIAL_MAX)
+        sm_smooth = self.animation_manager.get_tween(
+            f"p{player.player_index}_sm",
+            player.special_melee / SPECIAL_MAX,
+        )
+        sm_smooth.set_target(player.special_melee / SPECIAL_MAX)
+        self._bar(x + pad, cy, bar_w2, self._s(BAR_H_THIN), sr_smooth.current, COLORS["special"], "#0B2C3C", "ESP DIST")
+        self._bar(x + pad + bar_w2 + self._s(4), cy, max(self._s(44), left_w - bar_w2 - self._s(4)), self._s(BAR_H_THIN), sm_smooth.current, COLORS["sword"], "#3A2A08", "ESP MELEE")
+
         if player.special_ranged >= SPECIAL_MAX and player.special_melee >= SPECIAL_MAX:
             pulse = (pygame.time.get_ticks() // 400) % 2 == 0
             if pulse:
-                suprema_surf = self.font_small.render("★ SUPREMA DISPONIVEL ★", True, (250, 204, 21))
-                bg_w = suprema_surf.get_width() + 16
-                bg_h = suprema_surf.get_height() + 6
-                bg_surf = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
-                pygame.draw.rect(bg_surf, (20, 10, 0, 200), bg_surf.get_rect(), border_radius=5)
-                pygame.draw.rect(bg_surf, (250, 204, 21, 180), bg_surf.get_rect(), width=1, border_radius=5)
-                self.screen.blit(bg_surf, (304, 50))
-                self.screen.blit(suprema_surf, (312, 53))
+                ss, sr2 = self.font_tiny.render("SUPREMA", (250, 204, 21))
+                self.screen.blit(ss, (x + pad + left_w // 2 - sr2.width // 2, cy - self._s(2)))
 
-        w_name = CHARACTERS[player.char_class][player.mode]
-        mode_color = COLORS["sword"] if player.mode == "weapon_2" else COLORS["projectile"]
-        self._pill(448, 18, 96, 23, w_name.upper(), mode_color)
+        cy += self._s(BAR_H_THIN + 5)
+        self._draw_cooldown_row(game, player, x + pad, cy, left_w)
+        self._draw_equipment_summary(inv, right_x, content_y, right_w)
+        self._draw_attribute_summary(player, right_x, content_y + self._s(43), right_w, rect.bottom - (content_y + self._s(43)) - self._s(5))
 
-        ammo_capacity = max(1, game.magazine_capacity())
-        ammo_fill = player.ammo_magazine / ammo_capacity
-        ammo_label = f"PNT {player.ammo_magazine}/{ammo_capacity}"
-        if player.reload_timer > 0:
-            ammo_fill = 1.0 - min(1.0, player.reload_timer / max(0.01, player.reload_duration))
-            ammo_label = f"REC {player.reload_timer:.1f}"
-        self._mini_cooldown(448, 44, 104, 23, ammo_label, ammo_fill)
+        return rect
 
-        max_reserve = game.max_ammo_reserve_for(player)
-        reserve_fill = player.ammo_reserve / max_reserve
-        self._mini_cooldown(560, 44, 104, 23, f"RES {player.ammo_reserve}/{max_reserve}", reserve_fill)
-
-        dash_fill = 1.0 - min(1.0, player.dash_cooldown / DASH_COOLDOWN)
-        self._mini_cooldown(552, 18, 62, 23, "DASH", dash_fill)
-
-        info = f"Abates {player.kills}   Moedas {player.coins}   Pontos {player.score}"
-        self.screen.blit(self.font_small.render(info, True, hex_color(COLORS["text"])), (632, 17))
-        passive_w = len(player.passives) * 24 + max(0, len(player.passives) - 1) * 4
-        message_limit = max(120, SCREEN_WIDTH - 20 - passive_w - 640)
-        message = game.message
-        while len(message) > 4 and self.font_tiny.size(message + "...")[0] > message_limit:
-            message = message[:-1]
-        if message != game.message:
-            message += "..."
-        self.screen.blit(self.font_tiny.render(message, True, hex_color(COLORS["muted"])), (632, 44))
-
-        self._draw_item_slots(game)
-        self._draw_passive_slots(game)
-        self._draw_stats_panel(game)
-        self._draw_quest_panel(game)
-        self._draw_buff_list(player, SCREEN_WIDTH - 24, 324, align_right=True)
-
-    def _draw_coop_hud(self, game):
-        pygame.draw.rect(self.screen, hex_color(COLORS["panel"]), (0, 0, SCREEN_WIDTH, 90))
-        pygame.draw.line(self.screen, (30, 41, 59), (0, 90), (SCREEN_WIDTH, 90), 2)
-        self._draw_player_hud_block(game, game.player, 24, 12, left=True)
-        self._draw_player_hud_block(game, game.player2, SCREEN_WIDTH - 418, 12, left=False)
-
-        coins = game.shared_coins
-        score = sum(player.score for player in game.players)
-        center_info = f"Moedas compartilhadas {coins}   Pontos {score}"
-        self._center_text(center_info, self.font_small, 16, COLORS["text"])
-        message = game.message
-        while len(message) > 4 and self.font_tiny.size(message + "...")[0] > 360:
-            message = message[:-1]
-        if message != game.message:
-            message += "..."
-        self._center_text(message, self.font_tiny, 42, COLORS["muted"])
-        if game.level_up_pending:
-            self._center_text(f"Turno do Jogador {game.level_up_player_index + 1}", self.font_tiny, 64, COLORS["upgrade"])
-        self._draw_coop_stats_panels(game)
-        self._draw_quest_panel(game)
-        self._draw_buff_list(game.player, 14, 410, align_right=False)
-        if getattr(game, 'player2', None):
-            self._draw_buff_list(game.player2, SCREEN_WIDTH - 14, 410, align_right=True)
-
-    def _draw_player_hud_block(self, game, player, x, y, left=True):
-        title = f"J{player.player_index + 1}  {CHARACTERS[player.char_class]['name']}"
+    def _draw_player_panel_expanded(self, game, player, inv, x, y, width=None):
+        w = int(width or self._s(PANEL_W_SINGLE_MAX))
+        h = self._s(PANEL_H)
+        pad = self._s(PANEL_PAD + 2)
+        gap = self._s(14)
+        rect = pygame.Rect(x, y, w, h)
         title_color = P2_AIM_COLOR if player.player_index == 1 else P1_AIM_COLOR
-        self.screen.blit(self.font_tiny.render(title.upper(), True, hex_color(title_color)), (x, y))
+
+        self._draw_panel_back(rect, alpha=178, border=hex_color(title_color), radius=7)
+
+        char_name = CHARACTERS[player.char_class]["name"]
         status = "CAIDO" if player.is_down else f"NV {player.level}"
-        self._bar(x, y + 18, 220, 12, player.health / max(1, player.max_health), COLORS["health"], COLORS["health_bg"], f"VIDA {status}")
-        self._bar(x, y + 36, 220, 10, player.special_ranged / SPECIAL_MAX, COLORS["special"], "#0B2C3C", "ESP DIST")
-        self._bar(x, y + 52, 220, 10, player.special_melee / SPECIAL_MAX, COLORS["sword"], "#3A2A08", "ESP MELEE")
+        title = f"J{player.player_index + 1} - {char_name} [{status}]"
+        self._render_fit(self.font_small, title.upper(), (x + pad, y + self._s(5)), hex_color(title_color), w - pad * 2)
+
+        content_y = y + self._s(28)
+        content_bottom = rect.bottom - self._s(7)
+        equip_w = self._s(196)
+        attr_w = self._s(200)
+        bars_w = max(self._s(270), w - pad * 2 - gap * 2 - equip_w - attr_w)
+        bars_x = x + pad
+        equip_x = bars_x + bars_w + gap
+        attr_x = equip_x + equip_w + gap
+
+        if attr_x + attr_w > rect.right - pad:
+            overflow = attr_x + attr_w - (rect.right - pad)
+            bars_w = max(self._s(240), bars_w - overflow)
+            equip_x = bars_x + bars_w + gap
+            attr_x = equip_x + equip_w + gap
+
+        h_smooth = self.animation_manager.get_tween(
+            f"p{player.player_index}_hp",
+            player.health / max(1, player.max_health),
+        )
+        h_smooth.set_target(player.health / max(1, player.max_health))
+        hp_label = f"VIDA {int(player.health)}/{int(player.max_health)}"
+        self._bar(bars_x, content_y, bars_w, self._s(18), h_smooth.current, COLORS["health"], COLORS["health_bg"], hp_label)
+
+        xp_y = content_y + self._s(23)
+        xp_f = player.xp / max(1, player.xp_to_next)
+        xp_lbl = f"XP NV {player.level}"
+        xp_smooth = self.animation_manager.get_tween(f"p{player.player_index}_xp", xp_f)
+        xp_smooth.set_target(xp_f)
+        self._bar(bars_x, xp_y, bars_w, self._s(11), xp_smooth.current, COLORS["xp"], "#15361F", xp_lbl)
+
+        special_y = content_y + self._s(39)
+        bar_w2 = max(self._s(96), (bars_w - self._s(8)) // 2)
+        sr_smooth = self.animation_manager.get_tween(
+            f"p{player.player_index}_sr",
+            player.special_ranged / SPECIAL_MAX,
+        )
+        sr_smooth.set_target(player.special_ranged / SPECIAL_MAX)
+        sm_smooth = self.animation_manager.get_tween(
+            f"p{player.player_index}_sm",
+            player.special_melee / SPECIAL_MAX,
+        )
+        sm_smooth.set_target(player.special_melee / SPECIAL_MAX)
+        self._bar(bars_x, special_y, bar_w2, self._s(12), sr_smooth.current, COLORS["special"], "#0B2C3C", "ESP DIST")
+        self._bar(
+            bars_x + bar_w2 + self._s(8),
+            special_y,
+            max(self._s(96), bars_w - bar_w2 - self._s(8)),
+            self._s(12),
+            sm_smooth.current,
+            COLORS["sword"],
+            "#3A2A08",
+            "ESP MELEE",
+        )
+
+        if player.special_ranged >= SPECIAL_MAX and player.special_melee >= SPECIAL_MAX:
+            pulse = (pygame.time.get_ticks() // 400) % 2 == 0
+            if pulse:
+                ss, sr2 = self.font_tiny.render("SUPREMA", (250, 204, 21))
+                self.screen.blit(ss, (bars_x + bars_w // 2 - sr2.width // 2, special_y - self._s(2)))
+
+        cooldown_y = content_y + self._s(64)
+        self._draw_cooldown_row(game, player, bars_x, cooldown_y, bars_w)
+        self._draw_equipment_block(inv, equip_x, content_y, equip_w, content_bottom - content_y)
+        self._draw_attribute_block(player, attr_x, content_y, attr_w, content_bottom - content_y)
+
+        return rect
+
+    def _draw_equipment_block(self, inv, x, y, w, h):
+        header = "EQP"
+        self.font_tiny.render_to(self.screen, (x, y), header, hex_color(COLORS["muted"]))
+        active_items = inv.active_items()
+        count = f"{len(active_items)}/{MAX_ACTIVE_ITEMS}"
+        count_s, count_r = self.font_tiny.render(count, hex_color(COLORS["muted_2"]))
+        self.screen.blit(count_s, (x + w - count_r.width, y))
+
+        gap = self._s(7)
+        slot = min(self._s(30), max(self._s(24), (w - gap * (MAX_ACTIVE_ITEMS - 1)) // MAX_ACTIVE_ITEMS))
+        start_x = x + max(0, (w - (slot * MAX_ACTIVE_ITEMS + gap * (MAX_ACTIVE_ITEMS - 1))) // 2)
+        slot_y = y + self._s(22)
+        for i in range(MAX_ACTIVE_ITEMS):
+            rect = pygame.Rect(start_x + i * (slot + gap), slot_y, slot, slot)
+            pygame.draw.rect(self.screen, (15, 23, 42), rect, border_radius=self._s(5))
+            pygame.draw.rect(self.screen, (51, 65, 85), rect, width=1, border_radius=self._s(5))
+            if i >= len(active_items):
+                continue
+
+            item = active_items[i]
+            if item.is_relic:
+                pygame.draw.rect(self.screen, (250, 180, 50), rect, width=2, border_radius=self._s(5))
+            elif item.is_hybrid:
+                pygame.draw.rect(self.screen, hex_color(COLORS["upgrade"]), rect, width=1, border_radius=self._s(5))
+
+            ik = getattr(item, "key", None)
+            icon = getattr(self, "item_icons", {}).get(ik)
+            if icon:
+                if icon.get_width() != slot or icon.get_height() != slot:
+                    icon = pygame.transform.smoothscale(icon, (slot, slot))
+                self.screen.blit(icon, rect.topleft)
+            elif item.is_hybrid or item.is_relic:
+                pygame.draw.circle(self.screen, hex_color(COLORS["upgrade"]), rect.center, max(5, slot // 3))
+            else:
+                pygame.draw.circle(self.screen, hex_color(COLORS["special"]), rect.center, max(5, slot // 3))
+
+            lvl_s, lvl_r = self.font_tiny.render(str(item.level), hex_color(COLORS["text"]))
+            lvl_r.bottomright = (rect.right - self._s(1), rect.bottom + self._s(1))
+            bg_s = pygame.Surface((lvl_r.width + self._s(5), lvl_r.height), pygame.SRCALPHA)
+            pygame.draw.rect(bg_s, (9, 14, 24, 220), bg_s.get_rect(), border_radius=self._s(2))
+            self.screen.blit(bg_s, (lvl_r.left - self._s(3), lvl_r.top))
+            self.screen.blit(lvl_s, lvl_r)
+
+        hint_y = slot_y + slot + self._s(10)
+        hint = "ativos prontos" if active_items else "slots livres"
+        self._render_fit(self.font_tiny, hint, (x, hint_y), hex_color(COLORS["muted_2"]), w)
+
+    def _draw_attribute_block(self, player, x, y, w, h):
+        char_passives = CHARACTERS[player.char_class]["passives"]
+        upgraded = [(key, lvl) for key, lvl in player.passives.items() if lvl > 0]
+        total = len(player.passives)
+
+        self.font_tiny.render_to(self.screen, (x, y), "ATR", hex_color(COLORS["muted"]))
+        counter = f"{len(upgraded)}/{total}"
+        counter_s, counter_r = self.font_tiny.render(counter, hex_color(COLORS["muted_2"]))
+        self.screen.blit(counter_s, (x + w - counter_r.width, y))
+
+        start_y = y + self._s(19)
+        gap = self._s(3)
+        cols = 4
+        chip_h = self._s(16)
+        chip_w = max(self._s(34), (w - gap * (cols - 1)) // cols)
+        max_rows = max(1, (h - self._s(19) + gap) // (chip_h + gap))
+        max_items = max_rows * cols
+
+        if not upgraded:
+            empty_cols = 5
+            empty_w = max(self._s(18), (w - gap * (empty_cols - 1)) // empty_cols)
+            for i in range(min(total, 10)):
+                col = i % empty_cols
+                row = i // empty_cols
+                rect = pygame.Rect(x + col * (empty_w + gap), start_y + row * (chip_h + gap), empty_w, chip_h)
+                pygame.draw.rect(self.screen, (15, 23, 42), rect, border_radius=self._s(4))
+                pygame.draw.rect(self.screen, (51, 65, 85), rect, width=1, border_radius=self._s(4))
+            return
+
+        visible = upgraded[:max_items]
+        for i, (key, lvl) in enumerate(visible):
+            col = i % cols
+            row = i // cols
+            rect = pygame.Rect(x + col * (chip_w + gap), start_y + row * (chip_h + gap), chip_w, chip_h)
+            pygame.draw.rect(self.screen, (15, 23, 42), rect, border_radius=self._s(4))
+            pygame.draw.rect(self.screen, hex_color(COLORS["special"]), rect, width=1, border_radius=self._s(4))
+            short = char_passives.get(key, {}).get("short", key[:3].upper())
+            label = self._fit_text(self.font_tiny, f"{short} {lvl}", rect.width - self._s(6))
+            surf, s_rect = self.font_tiny.render(label, hex_color(COLORS["text"]))
+            self.screen.blit(surf, (rect.centerx - s_rect.width // 2, rect.centery - s_rect.height // 2))
+
+        hidden = len(upgraded) - len(visible)
+        if hidden > 0:
+            note = f"+{hidden}"
+            self.font_tiny.render_to(self.screen, (x + w - self.font_tiny.get_rect(note).width, y + self._s(61)), note, hex_color(COLORS["upgrade"]))
+
+    def _draw_cooldown_row(self, game, player, x, y, w):
+        gap = self._s(3)
+        h = self._s(22)
+        cell_w = max(self._s(38), (w - gap * 3) // 4)
+        w_name = CHARACTERS[player.char_class][player.mode]
+        mode_col = COLORS["sword"] if player.mode == "weapon_2" else COLORS["projectile"]
+        self._pill(x, y, cell_w, h, w_name[:6].upper(), mode_col)
+
         capacity = max(1, game.magazine_capacity_for(player))
         ammo_fill = player.ammo_magazine / capacity
-        ammo_label = f"PNT {player.ammo_magazine}/{capacity}"
+        ammo_lbl = f"{player.ammo_magazine}/{capacity}"
         if player.reload_timer > 0:
             ammo_fill = 1.0 - min(1.0, player.reload_timer / max(0.01, player.reload_duration))
-            ammo_label = f"REC {player.reload_timer:.1f}"
-        self._mini_cooldown(x + 230, y + 18, 78, 22, ammo_label, ammo_fill)
-        dash_fill = 1.0 - min(1.0, player.dash_cooldown / DASH_COOLDOWN)
-        self._mini_cooldown(x + 230, y + 46, 78, 22, "DASH", dash_fill)
+            ammo_lbl = f"REC {player.reload_timer:.1f}s"
+        self._mini_cooldown(x + (cell_w + gap), y, cell_w, h, ammo_lbl, ammo_fill)
 
-        max_res = game.max_ammo_reserve_for(player)
+        max_res = max(1, game.max_ammo_reserve_for(player))
         res_fill = player.ammo_reserve / max_res
-        self._mini_cooldown(x + 316, y + 18, 78, 22, f"RES {player.ammo_reserve}/{max_res}", res_fill)
+        self._mini_cooldown(x + (cell_w + gap) * 2, y, cell_w, h, f"R {player.ammo_reserve}", res_fill)
 
-    def _draw_passive_slots(self, game):
-        player = game.player
-        char_data = CHARACTERS[player.char_class]["passives"]
-        slot_size = 24
-        spacing = 4
-        total_w = len(player.passives) * slot_size + max(0, len(player.passives) - 1) * spacing
-        x = SCREEN_WIDTH - 20 - total_w
-        y = 48
-        for i, (key, lvl) in enumerate(player.passives.items()):
-            rect = pygame.Rect(x + i * (slot_size + spacing), y, slot_size, slot_size)
-            pygame.draw.rect(self.screen, (15, 23, 42), rect, border_radius=16)
-            pygame.draw.rect(self.screen, hex_color(COLORS["special"]), rect, width=1, border_radius=16)
-            short = char_data[key]["short"]
-            surf = self.font_tiny.render(short, True, hex_color(COLORS["text"]))
-            self.screen.blit(surf, surf.get_rect(center=rect.center))
+        dash_fill = 1.0 - min(1.0, player.dash_cooldown / DASH_COOLDOWN)
+        dash_lbl = "DASH" if dash_fill >= 1.0 else f"{player.dash_cooldown:.1f}s"
+        self._mini_cooldown(x + (cell_w + gap) * 3, y, cell_w, h, dash_lbl, dash_fill)
 
-            lvl_surf = self.font_tiny.render(f"{lvl}", True, hex_color(COLORS["upgrade"]))
-            lvl_rect = lvl_surf.get_rect(bottomright=(rect.right, rect.bottom))
-            self.screen.blit(lvl_surf, lvl_rect)
+    def _draw_equipment_summary(self, inv, x, y, w):
+        label_w = self.font_tiny.get_rect("EQP").width
+        self.font_tiny.render_to(self.screen, (x, y - self._s(1)), "EQP", hex_color(COLORS["muted"]))
 
-    def _draw_item_slots(self, game):
-        slot_size = 32
-        spacing = 6
-        total_w = MAX_ACTIVE_ITEMS * slot_size + (MAX_ACTIVE_ITEMS - 1) * spacing
-        x = SCREEN_WIDTH - 20 - total_w
-        y = 12
-
-        active_items = game.inventory.active_items()
-
+        gap = self._s(SLOT_GAP)
+        slot = min(self._s(SLOT_ITEM), max(self._s(16), (w - label_w - self._s(6) - gap * (MAX_ACTIVE_ITEMS - 1)) // MAX_ACTIVE_ITEMS))
+        start_x = x + label_w + self._s(6)
+        active_items = inv.active_items()
         for i in range(MAX_ACTIVE_ITEMS):
-            rect = pygame.Rect(x + i * (slot_size + spacing), y, slot_size, slot_size)
-            pygame.draw.rect(self.screen, (15, 23, 42), rect, border_radius=4)
-            pygame.draw.rect(self.screen, (51, 65, 85), rect, width=1, border_radius=4)
+            item_x = start_x + i * (slot + gap)
+            rect = pygame.Rect(item_x, y, slot, slot)
+            pygame.draw.rect(self.screen, (15, 23, 42), rect, border_radius=self._s(4))
+            pygame.draw.rect(self.screen, (51, 65, 85), rect, width=1, border_radius=self._s(4))
+            if i >= len(active_items):
+                continue
 
-            if i < len(active_items):
-                item = active_items[i]
-                # Gold border for relics
-                if item.is_relic:
-                    pygame.draw.rect(self.screen, (250, 180, 50), rect, width=2, border_radius=4)
-                elif item.is_hybrid:
-                    pygame.draw.rect(self.screen, hex_color(COLORS["upgrade"]), rect, width=1, border_radius=4)
-                if item.is_hybrid or item.is_relic:
-                    pygame.draw.circle(self.screen, hex_color(COLORS["upgrade"]), rect.center, 10)
-                else:
-                    if item.key in self.item_icons:
-                        self.screen.blit(self.item_icons[item.key], (rect.x, rect.y))
-                    else:
-                        pygame.draw.circle(self.screen, hex_color(COLORS["special"]), rect.center, 10)
+            item = active_items[i]
+            if item.is_relic:
+                pygame.draw.rect(self.screen, (250, 180, 50), rect, width=2, border_radius=self._s(4))
+            elif item.is_hybrid:
+                pygame.draw.rect(self.screen, hex_color(COLORS["upgrade"]), rect, width=1, border_radius=self._s(4))
 
-                lvl_surf = self.font_tiny.render(str(item.level), True, hex_color(COLORS["text"]))
-                lvl_rect = lvl_surf.get_rect(bottomright=(rect.right - 1, rect.bottom))
-                bg_rect = lvl_rect.inflate(4, 2)
-                bg_surf = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
-                pygame.draw.rect(bg_surf, (9, 14, 24, 210), bg_surf.get_rect(), border_radius=2)
-                self.screen.blit(bg_surf, bg_rect.topleft)
-                self.screen.blit(lvl_surf, lvl_rect)
+            ik = getattr(item, "key", None)
+            icon = getattr(self, "item_icons", {}).get(ik)
+            if icon:
+                if icon.get_width() != slot or icon.get_height() != slot:
+                    icon = pygame.transform.smoothscale(icon, (slot, slot))
+                self.screen.blit(icon, rect.topleft)
+            elif item.is_hybrid or item.is_relic:
+                pygame.draw.circle(self.screen, hex_color(COLORS["upgrade"]), rect.center, max(4, slot // 3))
+            else:
+                pygame.draw.circle(self.screen, hex_color(COLORS["special"]), rect.center, max(4, slot // 3))
+
+            lvl_s, lvl_r = self.font_tiny.render(str(item.level), hex_color(COLORS["text"]))
+            lvl_r.bottomright = (rect.right, rect.bottom + self._s(2))
+            bg_s = pygame.Surface((lvl_r.width + self._s(4), lvl_r.height), pygame.SRCALPHA)
+            pygame.draw.rect(bg_s, (9, 14, 24, 210), bg_s.get_rect(), border_radius=self._s(2))
+            self.screen.blit(bg_s, (lvl_r.left - self._s(2), lvl_r.top))
+            self.screen.blit(lvl_s, lvl_r)
+
+    def _draw_attribute_summary(self, player, x, y, w, h):
+        self.font_tiny.render_to(self.screen, (x, y), "ATR", hex_color(COLORS["muted"]))
+        char_passives = CHARACTERS[player.char_class]["passives"]
+        upgraded = [(key, lvl) for key, lvl in player.passives.items() if lvl > 0]
+        if not upgraded:
+            text = f"0/{len(player.passives)}"
+            self.font_tiny.render_to(self.screen, (x + self._s(32), y), text, hex_color(COLORS["muted_2"]))
+            return
+
+        start_y = y + self._s(16)
+        chip_h = self._s(17)
+        gap = self._s(4)
+        cols = 3
+        chip_w = max(self._s(30), (w - gap * (cols - 1)) // cols)
+        max_rows = max(1, h // (chip_h + gap))
+        max_items = max_rows * cols
+        visible = upgraded[:max_items]
+        for i, (key, lvl) in enumerate(visible):
+            col = i % cols
+            row = i // cols
+            rect = pygame.Rect(x + col * (chip_w + gap), start_y + row * (chip_h + gap), chip_w, chip_h)
+            pygame.draw.rect(self.screen, (15, 23, 42), rect, border_radius=self._s(4))
+            pygame.draw.rect(self.screen, hex_color(COLORS["special"]), rect, width=1, border_radius=self._s(4))
+            short = char_passives.get(key, {}).get("short", key[:3].upper())
+            label = self._fit_text(self.font_tiny, f"{short}{lvl}", rect.width - self._s(6))
+            surf, s_rect = self.font_tiny.render(label, hex_color(COLORS["text"]))
+            self.screen.blit(surf, (rect.centerx - s_rect.width // 2, rect.centery - s_rect.height // 2))
+
+        hidden = len(upgraded) - len(visible)
+        if hidden > 0:
+            note = f"+{hidden}"
+            self.font_tiny.render_to(self.screen, (x + w - self.font_tiny.get_rect(note).width, y), note, hex_color(COLORS["upgrade"]))
+
+    def _bar(self, x, y, w, h, fill, color, bg, label):
+        fill = max(0, min(1, fill))
+        rect = pygame.Rect(x, y, w, h)
+        pygame.draw.rect(self.screen, hex_color(bg), rect, border_radius=self._s(5))
+        if fill > 0:
+            fill_rect = pygame.Rect(x, y, max(1, int(w * fill)), h)
+            pygame.draw.rect(self.screen, hex_color(color), fill_rect, border_radius=self._s(5))
+        pygame.draw.rect(self.screen, (15, 23, 42), rect, width=1, border_radius=self._s(5))
+
+        label = self._fit_text(self.font_tiny, label, w - self._s(10))
+        text_y = y + h // 2 - self.font_tiny.get_rect(label).height // 2 - self._s(1)
+        self.font_tiny.render_to(self.screen, (x + self._s(6), text_y + self._s(1)), label, (0, 0, 0))
+        self.font_tiny.render_to(self.screen, (x + self._s(5), text_y), label, hex_color(COLORS["text"]))
+
+    def _pill(self, x, y, w, h, text, color):
+        rect = pygame.Rect(x, y, w, h)
+        pygame.draw.rect(self.screen, hex_color(color), rect, border_radius=self._s(6))
+        pygame.draw.rect(self.screen, (255, 255, 255, 50), rect, width=1, border_radius=self._s(6))
+        text = self._fit_text(self.font_tiny, text, w - self._s(8))
+        surf, s_rect = self.font_tiny.render(text, (9, 14, 24))
+        self.screen.blit(surf, (x + w // 2 - s_rect.width // 2, y + h // 2 - s_rect.height // 2))
+
+    def _mini_cooldown(self, x, y, w, h, text, fill):
+        rect = pygame.Rect(x, y, w, h)
+        pygame.draw.rect(self.screen, (30, 41, 59), rect, border_radius=self._s(6))
+        if fill > 0:
+            fw = max(0, min(w, int(w * fill)))
+            pygame.draw.rect(self.screen, (34, 197, 94), (x, y, fw, h), border_radius=self._s(6))
+        pygame.draw.rect(self.screen, (15, 23, 42), rect, width=1, border_radius=self._s(6))
+        text = self._fit_text(self.font_tiny, text, w - self._s(8))
+        surf, s_rect = self.font_tiny.render(text, hex_color(COLORS["text"]))
+        self.screen.blit(surf, (x + w // 2 - s_rect.width // 2, y + h // 2 - s_rect.height // 2))
 
     def _draw_buff_list(self, player, start_x, start_y, align_right=False):
-        labels = {
-            "freeze": "congelante",
-            "speed": "velocidade",
-            "power": "dano",
-        }
+        labels = {"freeze": "Gelo", "speed": "Veloc.", "power": "Forca"}
         y = start_y
-        
         active_buffs = []
         if player.shield_timer > 0:
-            active_buffs.append(("escudo", player.shield_timer, COLORS["shield"]))
+            active_buffs.append(("Escudo", player.shield_timer, COLORS["shield"]))
         for name, timer in player.buffs.items():
             active_buffs.append((labels.get(name, name), timer, COLORS["upgrade"]))
-            
         for name, timer, color in active_buffs:
             text = f"{name} {timer:.0f}s"
-            width = max(82, self.font_tiny.size(text)[0] + 18)
-            x = start_x - width if align_right else start_x
-            self._pill(x, y, width, 22, text, color)
-            y += 28
+            width = max(self._s(72), self.font_tiny.get_rect(text).width + self._s(16))
+            bx = start_x - width if align_right else start_x
+            self._pill(bx, y, width, self._s(20), text, color)
+            y += self._s(26)
 
     def _draw_coop_stats_panels(self, game):
         if game.player2 is None:
-            return
-        y = 180
-        self._draw_stats_panel_for(game, game.player, game.get_inventory(0), 14, y, "Status J1")
-        self._draw_stats_panel_for(game, game.player2, game.get_inventory(1), SCREEN_WIDTH - 214, y, "Status J2")
+            empty = pygame.Rect(0, self._top_h(), 0, 0)
+            return empty, empty
+        y = self._top_h() + self._s(8)
+        left = self._draw_stats_panel_for(game, game.player, game.get_inventory(0), self._s(14), y, "Status J1", compact=True)
+        right = self._draw_stats_panel_for(
+            game,
+            game.player2,
+            game.get_inventory(1),
+            SCREEN_WIDTH - self._s(STATS_PANEL_W) - self._s(14),
+            y,
+            "Status J2",
+            compact=True,
+        )
+        return left, right
 
-    def _draw_stats_panel(self, game):
-        self._draw_stats_panel_for(game, game.player, game.inventory, SCREEN_WIDTH - 224, 94, "Status do boneco")
+    def _draw_stats_panel(self, game, y=None, compact=False):
+        y = self._top_h() + self._s(8) if y is None else y
+        return self._draw_stats_panel_for(
+            game,
+            game.player,
+            game.inventory,
+            SCREEN_WIDTH - self._s(STATS_PANEL_W) - self._s(14),
+            y,
+            "Status",
+            compact=compact,
+        )
 
-    def _draw_stats_panel_for(self, game, player, inv, x, y, title):
+    def _draw_stats_panel_for(self, game, player, inv, x, y, title, compact=False):
         terrain_key = game.world.terrain_at(player.pos.x, player.pos.y)
         terrain = TERRAIN_TYPES[terrain_key]
         max_speed = player.base_speed * game.effective_speed_multiplier_for(player)
         terrain_speed = max_speed * terrain["speed"]
         fire_rate = game.effective_attack_rate_multiplier_for(player, inv) / PROJECTILE_COOLDOWN
-        w = 200
-        h = 220
-        pygame.draw.rect(self.screen, hex_color(COLORS["panel"]), (x, y, w, h), border_radius=6)
-        pygame.draw.rect(self.screen, (51, 65, 85), (x, y, w, h), width=1, border_radius=6)
-        self.screen.blit(self.font_small.render(title, True, hex_color(COLORS["text"])), (x + 14, y + 10))
+        w, h = self._s(STATS_PANEL_W), self._s(156 if compact else 166)
+        rect = pygame.Rect(x, y, w, h)
+
+        self._draw_panel_back(rect, alpha=210, border=(51, 65, 85), radius=6)
+        self.font_tiny.render_to(self.screen, (x + self._s(10), y + self._s(8)), title.upper(), hex_color(COLORS["muted"]))
 
         stats = [
-            ("Vel max", f"{max_speed:.0f}"),
+            ("Vel. max", f"{max_speed:.0f}"),
             (f"Terreno {terrain['name']}", f"{terrain_speed:.0f}"),
             ("Dano tiro", f"{game.projectile_damage_for(player, inv):.0f}"),
             ("Dano espada", f"{game.sword_damage_for(player, inv):.0f}"),
             ("Alcance espada", f"{game.sword_radius_for(player, inv):.0f}"),
             ("Ritmo tiro", f"{fire_rate:.1f}/s"),
             ("Balas/salva", str(1 + player.passives.get("multishot", 0))),
-            ("Pente", f"{player.ammo_magazine}/{game.magazine_capacity_for(player)}"),
-            ("Reserva", str(player.ammo_reserve)),
-            ("Recarga", f"{player.reload_timer:.1f}s" if player.reload_timer > 0 else "pronta"),
         ]
 
-        line_y = y + 38
+        label_w = self._s(128)
+        value_w = w - label_w - self._s(24)
+        line_y = y + self._s(28)
+        line_gap = self._s(16)
         for label, value in stats:
-            self.screen.blit(self.font_tiny.render(label, True, hex_color(COLORS["muted"])), (x + 14, line_y))
-            value_surf = self.font_tiny.render(value, True, hex_color(COLORS["text"]))
-            self.screen.blit(value_surf, (x + w - 14 - value_surf.get_width(), line_y))
-            line_y += 17
+            self._render_fit(self.font_tiny, label, (x + self._s(10), line_y), hex_color(COLORS["muted"]), label_w)
+            value = self._fit_text(self.font_tiny, value, value_w)
+            vs, vr = self.font_tiny.render(value, hex_color(COLORS["text"]))
+            self.screen.blit(vs, (x + w - self._s(10) - vr.width, line_y))
+            line_y += line_gap
 
-        passive = f"Itens {len(inv.active_slots)}/{MAX_ACTIVE_ITEMS}  Pts {inv.points}"
-        self.screen.blit(self.font_tiny.render(passive, True, hex_color(COLORS["poison"])), (x + 14, y + h - 24))
+        passive = f"Pts item {inv.points}"
+        self._render_fit(self.font_tiny, passive, (x + self._s(10), y + h - self._s(20)), hex_color(COLORS["poison"]), w - self._s(20))
+        return rect
 
-    def _bar(self, x, y, w, h, fill, color, bg, label):
-        fill = max(0, min(1, fill))
-        pygame.draw.rect(self.screen, hex_color(bg), (x, y, w, h), border_radius=4)
-        pygame.draw.rect(self.screen, hex_color(color), (x, y, int(w * fill), h), border_radius=4)
-        pygame.draw.rect(self.screen, (15, 23, 42), (x, y, w, h), width=1, border_radius=4)
-        self.screen.blit(self.font_tiny.render(label, True, hex_color(COLORS["text"])), (x + 8, y - 1))
-
-    def _pill(self, x, y, w, h, text, color):
-        pygame.draw.rect(self.screen, hex_color(color), (x, y, w, h), border_radius=5)
-        label = self.font_tiny.render(text, True, (9, 14, 24))
-        self.screen.blit(label, (x + w // 2 - label.get_width() // 2, y + h // 2 - label.get_height() // 2))
-
-    def _mini_cooldown(self, x, y, w, h, text, fill):
-        pygame.draw.rect(self.screen, (30, 41, 59), (x, y, w, h), border_radius=5)
-        pygame.draw.rect(self.screen, (34, 197, 94), (x, y, int(w * fill), h), border_radius=5)
-        pygame.draw.rect(self.screen, (15, 23, 42), (x, y, w, h), width=1, border_radius=5)
-        label = self.font_tiny.render(text, True, hex_color(COLORS["text"]))
-        self.screen.blit(label, (x + w // 2 - label.get_width() // 2, y + h // 2 - label.get_height() // 2))
-
-    def _draw_quest_panel(self, game):
-        """Draws the quest panel on the left side, below the HUD."""
-        x, y, w = 14, 90, 230
+    def _draw_quest_panel(self, game, x=None, y=None, w=None, compact=False):
         q = game.quest
+        margin = self._s(HUD_MARGIN)
+        x = margin + self._s(4) if x is None else x
+        y = self._top_h() + self._s(8) if y is None else y
+        w = self._s(QUEST_PANEL_W) if w is None else int(w)
+        panel_h = self._s(44 if compact else 46) if q is None else self._s(44 if compact else 82)
+        rect = pygame.Rect(x, y, w, panel_h)
+
+        border = hex_color(COLORS["upgrade"]) if q else (30, 41, 59)
+        self._draw_panel_back(rect, alpha=200 if q else 178, border=border, radius=6)
 
         if q is None:
-            # Show cooldown until next quest
             wait = max(0, game.next_quest_timer)
-            panel_h = 46
-            overlay = pygame.Surface((w, panel_h), pygame.SRCALPHA)
-            pygame.draw.rect(overlay, (16, 25, 40, 190), overlay.get_rect(), border_radius=6)
-            self.screen.blit(overlay, (x, y))
-            pygame.draw.rect(self.screen, (30, 41, 59), (x, y, w, panel_h), width=1, border_radius=6)
-            self.screen.blit(self.font_tiny.render("MISSAO", True, hex_color(COLORS["muted"])), (x + 10, y + 6))
-            self.screen.blit(self.font_tiny.render(f"Proxima em {wait:.0f}s", True, hex_color(COLORS["muted_2"])), (x + 10, y + 24))
-            return
+            self.font_tiny.render_to(self.screen, (x + self._s(10), y + self._s(5)), "MISSAO", hex_color(COLORS["muted"]))
+            self._render_fit(self.font_tiny, f"Proxima em {wait:.0f}s", (x + self._s(10), y + self._s(22)), hex_color(COLORS["muted_2"]), w - self._s(20))
+            return rect
 
-        panel_h = 82
-        overlay = pygame.Surface((w, panel_h), pygame.SRCALPHA)
-        pygame.draw.rect(overlay, (16, 25, 40, 210), overlay.get_rect(), border_radius=6)
-        self.screen.blit(overlay, (x, y))
-        pygame.draw.rect(self.screen, hex_color(COLORS["upgrade"]), (x, y, w, panel_h), width=1, border_radius=6)
+        self.font_tiny.render_to(self.screen, (x + self._s(10), y + self._s(5)), "MISSAO ATIVA", hex_color(COLORS["upgrade"]))
 
-        self.screen.blit(self.font_tiny.render("MISSAO ATIVA", True, hex_color(COLORS["upgrade"])), (x + 10, y + 6))
+        max_lines = 1 if compact else 2
+        desc_y = y + self._s(20)
+        line_w = w - self._s(20)
+        for i, line in enumerate(self._wrap_lines(self.font_tiny, q["description"], line_w, max_lines)):
+            self.font_tiny.render_to(self.screen, (x + self._s(10), desc_y + i * self._s(13)), self._fit_text(self.font_tiny, line, line_w), hex_color(COLORS["text"]))
 
-        # Wrap description
-        desc = q["description"]
-        line1 = desc[:32]
-        line2 = desc[32:64] if len(desc) > 32 else ""
-        self.screen.blit(self.font_tiny.render(line1, True, hex_color(COLORS["text"])), (x + 10, y + 22))
-        if line2:
-            self.screen.blit(self.font_tiny.render(line2, True, hex_color(COLORS["text"])), (x + 10, y + 34))
-
-        # Progress bar
         target = q["target"]
-        progress_fill = min(1.0, game.quest_progress / target) if target > 0 else 0
-        bar_y = y + 52
-        pygame.draw.rect(self.screen, (30, 41, 59), (x + 10, bar_y, w - 20, 8), border_radius=4)
-        if progress_fill > 0:
-            pygame.draw.rect(self.screen, hex_color(COLORS["xp"]), (x + 10, bar_y, int((w - 20) * progress_fill), 8), border_radius=4)
+        prog_f = min(1.0, game.quest_progress / target) if target > 0 else 0
+        bar_y = y + self._s(31 if compact else 54)
+        bar_h = self._s(7 if compact else 8)
+        pygame.draw.rect(self.screen, (30, 41, 59), (x + self._s(10), bar_y, w - self._s(20), bar_h), border_radius=self._s(4))
+        if prog_f > 0:
+            pygame.draw.rect(
+                self.screen,
+                hex_color(COLORS["xp"]),
+                (x + self._s(10), bar_y, int((w - self._s(20)) * prog_f), bar_h),
+                border_radius=self._s(4),
+            )
 
-        # Timer
-        timer_left = max(0, q["timer"])
-        timer_color = COLORS["danger"] if timer_left < 10 else COLORS["muted"]
-        timer_surf = self.font_tiny.render(f"{timer_left:.0f}s  +3 niveis", True, hex_color(timer_color))
-        self.screen.blit(timer_surf, (x + 10, y + 64))
+        if not compact:
+            timer_left = max(0, q["timer"])
+            tcol = COLORS["danger"] if timer_left < 10 else COLORS["muted"]
+            self.font_tiny.render_to(self.screen, (x + self._s(10), y + self._s(66)), f"{timer_left:.0f}s  +3 niveis", hex_color(tcol))
 
+        return rect

@@ -2,13 +2,55 @@ import pygame
 from pygame.math import Vector2
 import math
 if __package__:
+    from ..config.config_loader import load_keybinds
     from ..data.constants import *
 else:
+    from Sobrevivencia.config.config_loader import load_keybinds
     from Sobrevivencia.data.constants import *
 
 class InputManager:
     def _default_bindings(self):
-        return {action: list(bindings) for action, bindings in DEFAULT_BINDINGS.items()}
+        controls = {action: list(bindings) for action, bindings in DEFAULT_BINDINGS.items()}
+        configured = load_keybinds()
+        for action, entries in configured.items():
+            if action not in controls or not isinstance(entries, list):
+                continue
+            parsed = [self._binding_from_config(entry) for entry in entries]
+            parsed = [binding for binding in parsed if binding is not None]
+            if not parsed:
+                continue
+            controls[action] = parsed[:BINDING_SLOT_COUNT]
+            while len(controls[action]) < BINDING_SLOT_COUNT:
+                controls[action].append(None)
+        return controls
+
+    def _binding_from_config(self, value):
+        if not isinstance(value, str) or ":" not in value:
+            return None
+        source, raw_code = value.split(":", 1)
+        source = source.strip().lower()
+        raw_code = raw_code.strip().lower()
+        if source == "keyboard":
+            key_name = raw_code.upper()
+            if len(raw_code) == 1 and raw_code.isalnum():
+                key_name = raw_code
+            key_constant = getattr(pygame, f"K_{key_name}", None)
+            if key_constant is not None:
+                return ("key", key_constant)
+            try:
+                return ("key", pygame.key.key_code(raw_code))
+            except ValueError:
+                return None
+        if source == "mouse":
+            aliases = {"left": 1, "middle": 2, "right": 3, "wheel_up": 4, "wheel_down": 5}
+            if raw_code in aliases:
+                return ("mouse", aliases[raw_code])
+            if raw_code.isdigit():
+                return ("mouse", int(raw_code))
+            return None
+        if source == "joy_button" and raw_code.isdigit():
+            return ("joy_button", int(raw_code))
+        return None
 
     def _poll_events(self, game):
         try:

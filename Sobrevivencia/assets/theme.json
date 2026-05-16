@@ -1,0 +1,91 @@
+{
+    "defaults": {
+        "colours": {
+            "normal_bg": "#1E293BCC",
+            "hovered_bg": "#334155CC",
+            "disabled_bg": "#0F172ACC",
+            "selected_bg": "#3B82F680",
+            "dark_bg": "#0F172AEE",
+            "normal_text": "#E2E8F0",
+            "hovered_text": "#F8FAFC",
+            "disabled_text": "#64748B",
+            "selected_text": "#FFFFFF",
+            "active_border": "#60A5FA",
+            "normal_border": "#334155",
+            "disabled_border": "#1E293B",
+            "hovered_border": "#60A5FA",
+            "link_text": "#38BDF8",
+            "link_hover": "#7DD3FC",
+            "link_selected": "#0EA5E9",
+            "text_cursor": "#F8FAFC",
+            "filled_bar": "#38BDF8",
+            "unfilled_bar": "#1E293B"
+        },
+        "font": {
+            "name": "Segoe UI",
+            "size": "15",
+            "bold": "0",
+            "italic": "0"
+        },
+        "border_width": "1",
+        "shadow_width": "2",
+        "border_radius": "8"
+    },
+    "#inventory_window": {
+        "colours": {
+            "dark_bg": "#0D1827F0",
+            "normal_border": "#3B82F680"
+        }
+    },
+    "button": {
+        "colours": {
+            "normal_bg": "#1E293B",
+            "hovered_bg": "#3B82F640",
+            "selected_bg": "#3B82F6",
+            "normal_border": "#475569",
+            "hovered_border": "#60A5FA",
+            "normal_text": "#CBD5E1",
+            "hovered_text": "#FFFFFF",
+            "selected_text": "#FFFFFF"
+        },
+        "misc": {
+            "border_width": "1",
+            "border_radius": "6"
+        }
+    },
+    "label": {
+        "colours": {
+            "normal_text": "#E2E8F0",
+            "dark_bg": "#00000000"
+        }
+    },
+    "panel": {
+        "colours": {
+            "dark_bg": "#1E293BCC",
+            "normal_border": "#334155"
+        },
+        "misc": {
+            "border_width": "1",
+            "border_radius": "8"
+        }
+    },
+    "scroll_container": {
+        "colours": {
+            "dark_bg": "#0F172ACC",
+            "normal_border": "#1E293B"
+        }
+    },
+    "#item_button": {
+        "colours": {
+            "normal_bg": "#1E293B",
+            "hovered_bg": "#1D4ED840",
+            "selected_bg": "#1D4ED880",
+            "normal_border": "#334155",
+            "hovered_border": "#3B82F6",
+            "selected_border": "#60A5FA"
+        },
+        "misc": {
+            "border_radius": "8"
+        }
+    }
+}

@@ -693,3 +693,12 @@ JOYSTICK_AIM_DEADZONE = 0.28
 JOYSTICK_AIM_DISTANCE = 230
 
 
+if __package__:
+    from ..config.config_loader import apply_overrides, load_balance, load_settings
+else:
+    from Sobrevivencia.config.config_loader import apply_overrides, load_balance, load_settings
+
+apply_overrides(globals(), load_settings(), {"SCREEN_WIDTH", "SCREEN_HEIGHT", "FPS"})
+apply_overrides(globals(), load_balance())
+
+

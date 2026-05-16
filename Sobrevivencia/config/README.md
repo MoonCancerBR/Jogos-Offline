@@ -6,13 +6,24 @@ Pasta para **configurações externas** do jogo — editáveis sem alterar códi
 
 | Arquivo | Função |
 |---|---|
-| `settings.json` | *(planejado)* Resolução, fullscreen, volume de SFX/BGM, idioma, sensibilidade de mira. |
-| `balance.json` | *(planejado)* Stats de inimigos, dano, velocidade, taxas de drop — tuning sem IDE. |
-| `keybinds.json` | *(planejado)* Mapeamento de teclas, botões de mouse e gamepad (salvo automaticamente ao remapear). |
+| `settings.json` | Resolução, FPS, fullscreen e volumes base. |
+| `balance.json` | Overrides de balance carregados por `data/constants.py`. |
+| `keybinds.json` | Mapeamento inicial de teclado/mouse para ações do jogo. |
+| `config_loader.py` | Loader JSON resiliente e aplicação controlada de overrides. |
+| `runtime.py` | Fallbacks para dependências opcionais (`loguru`, `numba`, `pytweening`, UI nula). |
 | `__init__.py` | Marca o diretório como pacote Python. |
 
 ## Dependências Internas
 
-- Os arquivos `.json` serão carregados na inicialização pela camada `data/constants.py` ou por um futuro módulo `data/config_loader.py`.
-- `main.py` poderá ler `settings.json` antes de criar a janela Pygame.
-- Nenhum módulo de produção depende de `config/` atualmente — os valores estão hardcoded em `data/constants.py` até a implementação do loader.
+- `data/constants.py` carrega `SCREEN_WIDTH`, `SCREEN_HEIGHT`, `FPS` e overrides de `balance.json` no import.
+- `main.py` usa `settings.json` para definir fullscreen inicial.
+- `input/input_manager.py` carrega `keybinds.json` e preserva defaults quando uma entrada é inválida.
+- `config/runtime.py` permite que dependências externas sejam opcionais sem quebrar o jogo.
+
+## Como Editar Balance
+
+```bash
+python -m Sobrevivencia.tools.balance_editor list
+python -m Sobrevivencia.tools.balance_editor set PLAYER_BASE_SPEED 245.0 --backup
+python -m Sobrevivencia.tools.config_check
+```

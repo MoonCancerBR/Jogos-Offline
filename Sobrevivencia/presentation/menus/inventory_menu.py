@@ -31,14 +31,14 @@ class InventoryMenu:
         if inv.black_market_unlocked:
             tab_color1 = COLORS["xp"] if inventory_tab == "items" else COLORS["muted"]
             tab_color2 = COLORS["special"] if inventory_tab == "shop" else COLORS["muted"]
-            self.screen.blit(self.font.render("[L1] Itens", True, hex_color(tab_color1)), (120, 112))
-            self.screen.blit(self.font.render("[R1] Loja (Mercado Negro)", True, hex_color(tab_color2)), (300, 112))
+            self.font.render_to(self.screen, (120, 112), "[L1] Itens", hex_color(tab_color1))
+            self.font.render_to(self.screen, (300, 112), "[R1] Loja (Mercado Negro)", hex_color(tab_color2))
 
         items = []  # Garante que items está sempre definido
         if inventory_tab == "shop":
             shop_keys = list(BASE_ITEM_KEYS)
             selected = max(0, min(selected, len(shop_keys) - 1))
-            self.screen.blit(self.font_small.render("Itens Basicos a Venda (Custo: 15 pt)", True, hex_color(COLORS["text"])), (120, 160))
+            self.font_small.render_to(self.screen, (120, 160), "Itens Basicos a Venda (Custo: 15 pt)", hex_color(COLORS["text"]))
             
             slot_size = 64
             spacing = 16
@@ -66,7 +66,7 @@ class InventoryMenu:
                 item_short_description(mock_item)[:34],
             ]
             for offset, line in enumerate(wrapped):
-                self.screen.blit(self.font_small.render(line, True, hex_color(COLORS["text"] if offset == 0 else COLORS["muted"])), (panel_x, panel_y + offset * 28))
+                self.font_small.render_to(self.screen, (panel_x, panel_y + offset * 28), line, hex_color(COLORS["text"] if offset == 0 else COLORS["muted"]))
                 
             can_buy = inv.points >= 15
             buttons.append(self._button(panel_x, panel_y + 112, 230, 42, "Comprar (15 pts) - A", "shop_buy", mouse_pos, COLORS["xp"] if can_buy else COLORS["muted_2"]))
@@ -80,7 +80,7 @@ class InventoryMenu:
             items = active_items + reserve_items
             selected = max(0, min(selected, len(items) - 1))
 
-            self.screen.blit(self.font_small.render("Ativos", True, hex_color(COLORS["text"])), (120, 160))
+            self.font_small.render_to(self.screen, (120, 160), "Ativos", hex_color(COLORS["text"]))
             slot_size = 64
             spacing = 16
             for i in range(MAX_ACTIVE_ITEMS):
@@ -97,7 +97,7 @@ class InventoryMenu:
                     self._draw_item_icon(active_items[i], rect, game)
                     buttons.append((f"item_select:{index}", rect))
 
-            self.screen.blit(self.font_small.render("Reserva", True, hex_color(COLORS["text"])), (120, 268))
+            self.font_small.render_to(self.screen, (120, 268), "Reserva", hex_color(COLORS["text"]))
             for r_idx in range(20):
                 col = r_idx % 5
                 row = r_idx // 5
@@ -125,7 +125,7 @@ class InventoryMenu:
                 item_short_description(selected_item)[:34],
             ]
             for offset, line in enumerate(wrapped):
-                self.screen.blit(self.font_small.render(line, True, hex_color(COLORS["text"] if offset == 0 else COLORS["muted"])), (panel_x, panel_y + offset * 28))
+                self.font_small.render_to(self.screen, (panel_x, panel_y + offset * 28), line, hex_color(COLORS["text"] if offset == 0 else COLORS["muted"]))
             equip_label = "Remover dos ativos" if inv.is_active(selected_item.slot_key) else "Equipar"
             buttons.append(self._button(panel_x, panel_y + 112, 230, 42, equip_label, "item_toggle", mouse_pos, COLORS["special"]))
             if selected_item.is_relic:
@@ -140,8 +140,7 @@ class InventoryMenu:
                 cost = 1
                 rank_label = "BASICO (Rank 1)"
                 rank_color = (205, 127, 50)  # Bronze para Tier 1
-            rank_surf = self.font_tiny.render(f"Rank: {rank_label}", True, rank_color)
-            self.screen.blit(rank_surf, (panel_x, panel_y + 90))
+            self.font_tiny.render_to(self.screen, (panel_x, panel_y + 90), f"Rank: {rank_label}", rank_color)
             
             if selected_item.rank == 1 and selected_item.level >= 10 and inv.black_market_unlocked:
                 buttons.append(self._button(panel_x, panel_y + 166, 230, 42, "Transformar (15 pts)", "item_transform", mouse_pos, COLORS["special"]))
@@ -155,7 +154,7 @@ class InventoryMenu:
             if not inv.is_active(selected_item.slot_key):
                 buttons.append(self._button(panel_x, panel_y + 274, 230, 42, f"Vender ({sell_value} pts)", "item_sell", mouse_pos, "#DC2626")) # Vermelho para venda
             else:
-                self.screen.blit(self.font_tiny.render("(Desequipe para vender)", True, COLORS["muted_2"]), (panel_x, panel_y + 286))
+                self.font_tiny.render_to(self.screen, (panel_x, panel_y + 286), "(Desequipe para vender)", hex_color(COLORS["muted_2"]))
 
         hint = "I/Esc volta  |  Tab/Q troca aba  |  ENTER equipa  |  U upa  |  F fundir  |  S vender"
         if game.multiplayer:
@@ -195,8 +194,8 @@ class InventoryMenu:
             result = pygame.Rect(panel.centerx - 92, panel.y + 298, 184, 88)
             self._draw_tree_node(sources[0], left, game, show_level=True)
             self._draw_tree_node(sources[1], right, game, show_level=True)
-            plus = self.font_title.render("+", True, (179, 147, 74))
-            self.screen.blit(plus, (panel.centerx - plus.get_width() // 2, left.centery - plus.get_height() // 2))
+            plus_surf, p_rect = self.font_title.render("+", (179, 147, 74))
+            self.screen.blit(plus_surf, (panel.centerx - p_rect.width // 2, left.centery - p_rect.height // 2))
             pygame.draw.line(self.screen, (179, 147, 74), (left.centerx, left.bottom + 8), (result.centerx, result.y - 10), 2)
             pygame.draw.line(self.screen, (179, 147, 74), (right.centerx, right.bottom + 8), (result.centerx, result.y - 10), 2)
             pygame.draw.polygon(self.screen, (179, 147, 74), [(result.centerx, result.y - 2), (result.centerx - 7, result.y - 13), (result.centerx + 7, result.y - 13)])
@@ -265,18 +264,18 @@ class InventoryMenu:
             pygame.draw.rect(self.screen, (255, 215, 0), rect, width=2, border_radius=6)
 
         if show_level:
-            lvl_surf = self.font_tiny.render(str(item.level), True, hex_color(COLORS["text"]))
-            lvl_rect = lvl_surf.get_rect(bottomright=(rect.right - 2, rect.bottom - 2))
-            bg_rect = lvl_rect.inflate(4, 2)
+            lvl_surf, l_rect = self.font_tiny.render(str(item.level), hex_color(COLORS["text"]))
+            l_rect.bottomright = (rect.right - 2, rect.bottom - 2)
+            bg_rect = l_rect.inflate(4, 2)
             bg_surf = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
             pygame.draw.rect(bg_surf, (9, 14, 24, 210), bg_surf.get_rect(), border_radius=2)
             self.screen.blit(bg_surf, bg_rect.topleft)
-            self.screen.blit(lvl_surf, lvl_rect)
+            self.screen.blit(lvl_surf, l_rect)
 
         if game and item.slot_key in game.get_inventory(game.menu_player_index).fusion_marks:
-            tag = self.font_tiny.render("F", True, hex_color(COLORS["text"]))
-            pygame.draw.rect(self.screen, hex_color(COLORS["health"]), (rect.x + 2, rect.y + 2, tag.get_width() + 4, tag.get_height() + 4), border_radius=3)
-            self.screen.blit(tag, (rect.x + 4, rect.y + 4))
+            tag_surf, t_rect = self.font_tiny.render("F", hex_color(COLORS["text"]))
+            pygame.draw.rect(self.screen, hex_color(COLORS["health"]), (rect.x + 2, rect.y + 2, t_rect.width + 4, t_rect.height + 4), border_radius=3)
+            self.screen.blit(tag_surf, (rect.x + 4, rect.y + 4))
 
     def _hybrid_preview_item(self, sources):
         sources = tuple(sorted(sources))

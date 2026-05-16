@@ -71,10 +71,10 @@ class SystemMenus:
             x = columns[col]
             y = start_y + row * 36
             category = p_data.get("category", "Kit")
-            title = self.font_tiny.render(f"{category.upper()} | {p_data['title']}", True, hex_color(COLORS["text"]))
-            desc = self.font_tiny.render(p_data["description"][:58], True, hex_color(COLORS["muted"]))
-            self.screen.blit(title, (x, y))
-            self.screen.blit(desc, (x, y + 16))
+            title_surf, t_rect = self.font_tiny.render(f"{category.upper()} | {p_data['title']}", hex_color(COLORS["text"]))
+            desc_surf, d_rect = self.font_tiny.render(p_data["description"][:58], hex_color(COLORS["muted"]))
+            self.screen.blit(title_surf, (x, y))
+            self.screen.blit(desc_surf, (x, y + 16))
 
         if multiplayer and char_class_2:
             p1 = CHARACTERS[char_class]["name"]
@@ -116,8 +116,8 @@ class SystemMenus:
                 pygame.draw.rect(self.screen, (30, 41, 59), slot_rect, width=1, border_radius=2)
                 if i < len(passives):
                     pygame.draw.rect(self.screen, hex_color(COLORS["text"]), slot_rect, border_radius=2)
-                    lvl_text = self.font_tiny.render(str(passives[i][1]), True, hex_color(COLORS["bg"]))
-                    self.screen.blit(lvl_text, (slot_rect.centerx - lvl_text.get_width() // 2, slot_rect.centery - lvl_text.get_height() // 2))
+                    lvl_surf, l_rect = self.font_tiny.render(str(passives[i][1]), hex_color(COLORS["bg"]))
+                    self.screen.blit(lvl_surf, (slot_rect.centerx - l_rect.width // 2, slot_rect.centery - l_rect.height // 2))
 
         if game.multiplayer:
             draw_build_for_player(game.player, SCREEN_WIDTH // 4, 520, f"BUILD J1 ({CHARACTERS[game.player.char_class]['name']})")
@@ -169,10 +169,10 @@ class SystemMenus:
 
         slot_x = [panel.x + 400, panel.x + 558, panel.x + 716]
         slot_w = 142
-        self.screen.blit(self.font_tiny.render("ACAO", True, hex_color(COLORS["muted"])), (panel.x + 22, panel.y + 18))
-        self.screen.blit(self.font_tiny.render("PRIMARIO", True, hex_color(COLORS["muted"])), (slot_x[0] + 30, panel.y + 18))
-        self.screen.blit(self.font_tiny.render("ALT.", True, hex_color(COLORS["muted"])), (slot_x[1] + 56, panel.y + 18))
-        self.screen.blit(self.font_tiny.render("CONTROLE", True, hex_color(COLORS["muted"])), (slot_x[2] + 36, panel.y + 18))
+        self.font_tiny.render_to(self.screen, (panel.x + 22, panel.y + 18), "ACAO", hex_color(COLORS["muted"]))
+        self.font_tiny.render_to(self.screen, (slot_x[0] + 30, panel.y + 18), "PRIMARIO", hex_color(COLORS["muted"]))
+        self.font_tiny.render_to(self.screen, (slot_x[1] + 56, panel.y + 18), "ALT.", hex_color(COLORS["muted"]))
+        self.font_tiny.render_to(self.screen, (slot_x[2] + 36, panel.y + 18), "CONTROLE", hex_color(COLORS["muted"]))
 
         buttons = []
         y = panel.y + 42
@@ -187,8 +187,7 @@ class SystemMenus:
             if active:
                 pygame.draw.rect(self.screen, hex_color(COLORS["upgrade"]), row_rect, width=1, border_radius=5)
 
-            label = self.font_small.render(row["label"], True, hex_color(COLORS["text"]))
-            self.screen.blit(label, (row_rect.x + 12, row_rect.y + 5))
+            self.font_small.render_to(self.screen, (row_rect.x + 12, row_rect.y + 5), row["label"], hex_color(COLORS["text"]))
 
             for slot in range(len(row["bindings"])):
                 binding_rect = pygame.Rect(slot_x[slot], row_rect.y + 4, slot_w, 22)
@@ -198,8 +197,8 @@ class SystemMenus:
                 pygame.draw.rect(self.screen, hex_color(color), binding_rect, border_radius=4)
                 pygame.draw.rect(self.screen, (226, 232, 240), binding_rect, width=1 if waiting or slot_active else 0, border_radius=4)
                 text = "Pressione..." if waiting else row["bindings"][slot]
-                surf = self.font_tiny.render(text[:18], True, hex_color(COLORS["text"]))
-                self.screen.blit(surf, (binding_rect.centerx - surf.get_width() // 2, binding_rect.y + 4))
+                surf, s_rect = self.font_tiny.render(text[:18], hex_color(COLORS["text"]))
+                self.screen.blit(surf, (binding_rect.centerx - s_rect.width // 2, binding_rect.y + 4))
                 buttons.append((f"bind:{row['action']}:{slot}", binding_rect))
             y += row_h
 
@@ -246,8 +245,8 @@ class SystemMenus:
             pygame.draw.rect(self.screen, (31, 41, 55), (x, y, 58, 34), 1, border_radius=4)
 
     def _center_text(self, text, font, y, color):
-        surf = font.render(text, True, hex_color(color))
-        self.screen.blit(surf, (SCREEN_WIDTH // 2 - surf.get_width() // 2, y))
+        f_rect = font.get_rect(text)
+        font.render_to(self.screen, (SCREEN_WIDTH // 2 - f_rect.width // 2, y), text, hex_color(color))
 
     def _button(self, x, y, w, h, text, action, mouse_pos, color, selected=False):
         rect = pygame.Rect(x, y, w, h)
@@ -257,8 +256,9 @@ class SystemMenus:
             base = tuple(min(255, channel + 24) for channel in base)
         pygame.draw.rect(self.screen, base, rect, border_radius=7)
         pygame.draw.rect(self.screen, (226, 232, 240), rect, width=3 if selected else 1, border_radius=7)
-        surf = self.font.render(text, True, (7, 17, 30) if color not in (COLORS["panel_2"], COLORS["muted_2"]) else hex_color(COLORS["text"]))
-        self.screen.blit(surf, (x + w // 2 - surf.get_width() // 2, y + h // 2 - surf.get_height() // 2))
+        txt_color = (7, 17, 30) if color not in (COLORS["panel_2"], COLORS["muted_2"]) else hex_color(COLORS["text"])
+        surf, s_rect = self.font.render(text, txt_color)
+        self.screen.blit(surf, (x + w // 2 - s_rect.width // 2, y + h // 2 - s_rect.height // 2))
         return action, rect
 
     def _wrap_text(self, text, max_chars):
