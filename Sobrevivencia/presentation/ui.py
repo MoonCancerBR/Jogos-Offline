@@ -23,6 +23,7 @@ if __package__:
     from .menus.inventory_gui import InventoryGUI
     from .menus.shop_menus import ShopMenus
     from .menus.system_menus import SystemMenus
+    from .menus.ui_components import UIComponentFactory, sync_windows_for_state
     from .animation_manager import AnimationManager
     from .particle_manager import ParticleManager
 
@@ -32,6 +33,7 @@ else:
     from Sobrevivencia.presentation.menus.inventory_gui import InventoryGUI
     from Sobrevivencia.presentation.menus.shop_menus import ShopMenus
     from Sobrevivencia.presentation.menus.system_menus import SystemMenus
+    from Sobrevivencia.presentation.menus.ui_components import UIComponentFactory, sync_windows_for_state
     from Sobrevivencia.presentation.animation_manager import AnimationManager
     from Sobrevivencia.presentation.particle_manager import ParticleManager
 
@@ -41,7 +43,7 @@ pygame_gui = optional_import("pygame_gui")
 pytweening = optional_import("pytweening") or TweeningFallback
 
 
-class UI(HudMenu, InventoryMenu, InventoryGUI, ShopMenus, SystemMenus):
+class UI(HudMenu, InventoryGUI, InventoryMenu, ShopMenus, SystemMenus):
     def __init__(self, screen):
         self.screen_original = screen
         self.game_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -112,9 +114,17 @@ class UI(HudMenu, InventoryMenu, InventoryGUI, ShopMenus, SystemMenus):
                 self.gui_manager = pygame_gui.UIManager((SCREEN_WIDTH, SCREEN_HEIGHT), _theme_path)
             except Exception:
                 self.gui_manager = pygame_gui.UIManager((SCREEN_WIDTH, SCREEN_HEIGHT))
+            try:
+                self.gui_manager.preload_fonts([
+                    {'name': 'noto_sans', 'point_size': 14, 'style': 'bold', 'antialiased': '1'}
+                ])
+            except Exception:
+                pass
         else:
             self.gui_manager = NullGUIManager()
+        self.components = UIComponentFactory(self.gui_manager)
         self.init_inventory_gui()
+        self.init_shop_menus()
 
         self.item_icons = {}
         _base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "items")
@@ -124,6 +134,37 @@ class UI(HudMenu, InventoryMenu, InventoryGUI, ShopMenus, SystemMenus):
                 self.item_icons[key] = pygame.transform.scale(img, (32, 32))
             except Exception:
                 pass
+
+    def sync_menu_windows(self, state):
+        sync_windows_for_state(self, state)
+
+    def draw_gui_layer(self):
+        self.gui_manager.update(0.016)
+        self.gui_manager.draw_ui(self.screen)
+
+    def draw_player_window_accent(self, window, player_index):
+        if window is None or player_index is None:
+            return
+        rect = window.get_abs_rect() if hasattr(window, "get_abs_rect") else getattr(window, "rect", None)
+        if rect is None:
+            return
+        color_key = P2_AIM_COLOR if player_index == 1 else P1_AIM_COLOR
+        color = hex_color(color_key)
+        pygame.draw.rect(self.screen, color, rect, width=3, border_radius=8)
+        pygame.draw.line(self.screen, color, (rect.left + 14, rect.top + 2), (rect.right - 44, rect.top + 2), 3)
+
+    def _scroll_container_to_item(self, scroll_container, item_top, item_height, visible_height, content_height):
+        scroll_bar = getattr(scroll_container, "vert_scroll_bar", None)
+        if scroll_bar is None:
+            return
+
+        max_scroll = max(0, content_height - visible_height)
+        if max_scroll <= 0:
+            return
+
+        target_scroll = item_top - max(8, (visible_height - item_height) // 2)
+        target_scroll = max(0, min(target_scroll, max_scroll))
+        scroll_bar.set_scroll_from_start_percentage(target_scroll / max(1, content_height))
 
     def screen_to_world(self, screen_pos, camera):
         return Vector2(screen_pos[0] + camera.x, screen_pos[1] + camera.y)
@@ -165,7 +206,7 @@ class UI(HudMenu, InventoryMenu, InventoryGUI, ShopMenus, SystemMenus):
             pts.append((center[0] + math.cos(ang) * r, center[1] + math.sin(ang) * r))
         pygame.draw.polygon(self.screen, color, pts)
 
-    def render_game(self, game, mouse_pos, dt=0.016, flip=True, aim_from_joystick=False, p2_aim_pos=None):
+    def render_game(self, game, mouse_pos, dt=0.016, flip=True, aim_from_joystick=False, p2_aim_pos=None, draw_gui=True):
         self.animation_manager.update(dt)
         self.particle_manager.update(dt)
         self.gui_manager.update(dt)
@@ -194,7 +235,8 @@ class UI(HudMenu, InventoryMenu, InventoryGUI, ShopMenus, SystemMenus):
         self.particle_manager.render(self.screen, camera)
         self._draw_floaters(game, camera)
         self._draw_hud(game)
-        self.gui_manager.draw_ui(self.screen)
+        if draw_gui:
+            self.gui_manager.draw_ui(self.screen)
         # Present via ModernGL if available, otherwise CPU blit
         if self.ctx:
             try:
@@ -561,9 +603,7 @@ class UI(HudMenu, InventoryMenu, InventoryGUI, ShopMenus, SystemMenus):
         right = Vector2(x, y) + aim.rotate(-132) * (player.radius * 0.86)
 
         aim_color = hex_color(P2_AIM_COLOR if player.player_index == 1 else P1_AIM_COLOR)
-        pygame.draw.line(self.screen, aim_color, (x, y), mouse_pos, 1)
-        if aim_from_joystick:
-            self._draw_joystick_aim_pointer(mouse_pos, aim, aim_color)
+        self._draw_crosshair(player, (x, y), mouse_pos, aim, aim_from_joystick)
         self._draw_shadow((x, y), player.radius, alpha=105)
         if player.dash_timer > 0:
             dash_alpha = int(55 + 85 * min(1.0, player.dash_timer / max(0.01, DASH_DURATION)))
@@ -626,49 +666,36 @@ class UI(HudMenu, InventoryMenu, InventoryGUI, ShopMenus, SystemMenus):
                 cx2 = int(x + math.cos(angle) * aura_r * 0.72)
                 cy2 = int(y + math.sin(angle) * aura_r * 0.72)
                 pygame.draw.circle(overlay_aura, (250, 160, 50, 170), (cx2, cy2), 12)
+
+        if not player.is_down and player.ammo_magazine <= 0:
+            pulse = (pygame.time.get_ticks() // 250) % 2 == 0
+            if pulse:
+                msg = "SEM MUNICAO!" if player.ammo_reserve <= 0 else "RECARREGANDO"
+                color = hex_color(COLORS["health"]) if player.ammo_reserve <= 0 else hex_color(COLORS["coin"])
+                ammo_text, text_rect = self.font_small.render(msg, color)
+                text_rect.center = (x, y - int(player.radius) - 20)
+                
+                # Create a semi-transparent background
+                bg_surf = pygame.Surface((text_rect.width + 12, text_rect.height + 6), pygame.SRCALPHA)
+                pygame.draw.rect(bg_surf, (15, 23, 42, 200), bg_surf.get_rect(), border_radius=4)
+                self.screen.blit(bg_surf, (text_rect.x - 6, text_rect.y - 3))
+                self.screen.blit(ammo_text, text_rect)
+
+        # Relic aura: two rotating fire circles
+        inv = game.get_inventory(player.player_index)
+        has_relic = any(item.is_relic for item in inv.active_items())
+        if has_relic:
+            aura_r = 82
+            overlay_aura = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            for i in range(2):
+                angle = game.relic_aura_angle + i * math.pi
+                cx2 = int(x + math.cos(angle) * aura_r * 0.72)
+                cy2 = int(y + math.sin(angle) * aura_r * 0.72)
+                pygame.draw.circle(overlay_aura, (250, 160, 50, 170), (cx2, cy2), 12)
                 pygame.draw.circle(overlay_aura, (255, 210, 100, 90), (cx2, cy2), 20)
             pygame.draw.circle(overlay_aura, (167, 139, 250, 40), (x, y), aura_r)
             pygame.draw.circle(overlay_aura, (250, 180, 50, 100), (x, y), aura_r, 2)
             self.screen.blit(overlay_aura, (0, 0))
-
-    def _draw_joystick_aim_pointer(self, mouse_pos, aim, aim_color=(56, 189, 248)):
-        cx, cy = int(mouse_pos[0]), int(mouse_pos[1])
-        ticks = pygame.time.get_ticks()
-        pulse = 0.5 + 0.5 * math.sin(ticks * 0.005)
-
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-
-        # Outer glow ring (pulsing)
-        outer_r = int(18 + pulse * 3)
-        glow_alpha = int(40 + 30 * pulse)
-        pygame.draw.circle(overlay, (*aim_color, glow_alpha), (cx, cy), outer_r + 6)
-        pygame.draw.circle(overlay, (*aim_color, int(150 + 60 * pulse)), (cx, cy), outer_r, 2)
-
-        # Cross lines (4 lines radiating from center with a gap)
-        gap = 5
-        line_len = int(12 + pulse * 2)
-        cross_color = (226, 232, 240, 220)
-        for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
-            x1 = cx + dx * gap
-            y1 = cy + dy * gap
-            x2 = cx + dx * (gap + line_len)
-            y2 = cy + dy * (gap + line_len)
-            pygame.draw.line(overlay, cross_color, (x1, y1), (x2, y2), 2)
-
-        # Bright center dot
-        pygame.draw.circle(overlay, (255, 255, 255, 240), (cx, cy), 2)
-
-        # Small directional arrow showing aim direction
-        arrow_tip = Vector2(cx, cy) + aim * (outer_r + 10 + pulse * 2)
-        side = aim.rotate(90)
-        arrow_left = arrow_tip - aim * 7 + side * 4
-        arrow_right = arrow_tip - aim * 7 - side * 4
-        pygame.draw.polygon(overlay, (*aim_color, int(180 + 50 * pulse)),
-                            [(int(arrow_tip.x), int(arrow_tip.y)),
-                             (int(arrow_left.x), int(arrow_left.y)),
-                             (int(arrow_right.x), int(arrow_right.y))])
-
-        self.screen.blit(overlay, (0, 0))
 
     def _draw_special_blast(self, game, camera):
         if game.special_blast_timer <= 0:
@@ -689,6 +716,83 @@ class UI(HudMenu, InventoryMenu, InventoryGUI, ShopMenus, SystemMenus):
             pygame.draw.line(overlay, (224, 242, 254, int(80 * alpha)), p1, p2, 2)
         self.screen.blit(overlay, (0, 0))
 
+    def _draw_crosshair(self, player, start_pos, end_pos, aim_dir, is_joystick):
+        if player.is_down:
+            return
+
+        cx, cy = int(end_pos[0]), int(end_pos[1])
+        px, py = int(start_pos[0]), int(start_pos[1])
+        ticks = pygame.time.get_ticks()
+
+        # Determine state color
+        base_color = hex_color(P2_AIM_COLOR if player.player_index == 1 else P1_AIM_COLOR)
+        if player.reload_timer > 0:
+            base_color = hex_color(COLORS["coin"])  # Golden/Orange when reloading
+        elif player.ammo_magazine <= 0:
+            base_color = hex_color(COLORS["danger"])  # Red when out of ammo
+
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+
+        # 1. Fading Dashed Laser Sight
+        dist = Vector2(end_pos).distance_to(Vector2(start_pos))
+        dash_len, gap_len = 8, 8
+        if dist > 30:
+            num_dashes = int(dist / (dash_len + gap_len))
+            for i in range(num_dashes):
+                # Fade out as it gets further from player (closer to crosshair)
+                alpha = int(255 * (1.0 - (i / max(1, num_dashes))))
+                if alpha <= 0: continue
+                start_dash = Vector2(start_pos) + aim_dir * (i * (dash_len + gap_len) + 24)
+                end_dash = start_dash + aim_dir * dash_len
+                # Don't draw past the crosshair
+                if start_dash.distance_to(Vector2(start_pos)) > dist - 20: break
+                pygame.draw.line(overlay, (*base_color, alpha // 2), start_dash, end_dash, 2)
+                pygame.draw.line(overlay, (*base_color, alpha), start_dash, end_dash, 1)
+
+        # 2. Modern Rotating Reticle
+        pulse = 0.5 + 0.5 * math.sin(ticks * 0.008)
+        outer_r = 16 + int(pulse * 2)
+        ring_alpha = 150 + int(105 * pulse)
+        
+        # Draw 4 rotating segments
+        angle_offset = (ticks * 0.15) % 360
+        rect = pygame.Rect(cx - outer_r, cy - outer_r, outer_r * 2, outer_r * 2)
+        for i in range(4):
+            start_angle = math.radians(angle_offset + i * 90)
+            end_angle = math.radians(angle_offset + i * 90 + 45)  # 45 deg arc
+            pygame.draw.arc(overlay, (*base_color, ring_alpha), rect, start_angle, end_angle, 2)
+
+        # Inner Precision Cross
+        cross_len = 6
+        for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+            pygame.draw.line(overlay, (*base_color, 255), 
+                             (cx + dx * 5, cy + dy * 5), 
+                             (cx + dx * (5 + cross_len), cy + dy * (5 + cross_len)), 2)
+
+        # Center Dot
+        pygame.draw.circle(overlay, (255, 255, 255, 255), (cx, cy), 2)
+        pygame.draw.circle(overlay, (*base_color, 180), (cx, cy), 4, 1)
+
+        # 3. Dynamic Reloading Ring
+        if player.reload_timer > 0:
+            reload_progress = 1.0 - (player.reload_timer / max(0.01, player.reload_duration))
+            rel_r = outer_r + 6
+            rel_rect = pygame.Rect(cx - rel_r, cy - rel_r, rel_r * 2, rel_r * 2)
+            pygame.draw.circle(overlay, (*base_color, 40), (cx, cy), rel_r, 3)
+            pygame.draw.arc(overlay, (*base_color, 255), rel_rect, math.pi / 2, math.pi / 2 + (2 * math.pi * reload_progress), 3)
+
+        # 4. Joystick Directional Arrow Indicator
+        if is_joystick:
+            arrow_tip = Vector2(cx, cy) + aim_dir * (outer_r + 8 + pulse * 3)
+            side = aim_dir.rotate(90)
+            arrow_left = arrow_tip - aim_dir * 8 + side * 5
+            arrow_right = arrow_tip - aim_dir * 8 - side * 5
+            pygame.draw.polygon(overlay, (*base_color, 220), 
+                                [(arrow_tip.x, arrow_tip.y), 
+                                 (arrow_left.x, arrow_left.y), 
+                                 (arrow_right.x, arrow_right.y)])
+
+        self.screen.blit(overlay, (0, 0))
     def _draw_floaters(self, game, camera):
         for floater in game.floaters:
             duration = floater["duration"]
@@ -723,46 +827,3 @@ class UI(HudMenu, InventoryMenu, InventoryGUI, ShopMenus, SystemMenus):
                 surf, rect = self.font_tiny.render(floater["text"], hex_color(floater["color"]))
                 surf.set_alpha(alpha)
                 self.screen.blit(surf, (x - rect.width // 2, y - 14 - eased_offset))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

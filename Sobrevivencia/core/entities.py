@@ -122,6 +122,12 @@ class Player:
     magazine_bonus: int = 0
     reload_speed_bonus: float = 0
     passives: dict = field(default_factory=dict)
+    # Bônus injetados pelos itens equipados (recalculados a cada mudança de inventário)
+    item_speed_bonus: float = 0
+    item_damage_bonus: float = 0
+    item_attack_rate_bonus: float = 0
+    item_sword_range_bonus: float = 0
+    item_guardian_reduction: float = 0
     # Multiplayer Co-op
     player_index: int = 0
     is_down: bool = False
@@ -137,13 +143,13 @@ class Player:
         self.xp_to_next = int(40 + 25 * self.level)
 
     def damage_multiplier(self):
-        multiplier = 1.0 + self.damage_bonus
+        multiplier = 1.0 + self.damage_bonus + self.item_damage_bonus
         if self.buffs.get("power", 0) > 0:
             multiplier += 0.25
         return multiplier
 
     def speed_multiplier(self):
-        multiplier = 1.0 + self.speed_bonus
+        multiplier = 1.0 + self.speed_bonus + self.item_speed_bonus
         if self.buffs.get("speed", 0) > 0:
             multiplier += 0.45
         if self.shield_timer > 0:
@@ -151,7 +157,7 @@ class Player:
         return multiplier
 
     def attack_rate_multiplier(self):
-        return 1.0 + self.attack_rate_bonus
+        return 1.0 + self.attack_rate_bonus + self.item_attack_rate_bonus
 
     def projectile_damage(self):
         return PROJECTILE_DAMAGE * self.damage_multiplier()
@@ -160,7 +166,7 @@ class Player:
         return SWORD_DAMAGE * self.damage_multiplier()
 
     def sword_radius(self):
-        return SWORD_RADIUS * (1.0 + self.sword_range_bonus)
+        return SWORD_RADIUS * (1.0 + self.sword_range_bonus + self.item_sword_range_bonus)
 
     def add_special(self, amount, channel="ranged"):
         gained = amount * (1.0 + self.special_gain_bonus)

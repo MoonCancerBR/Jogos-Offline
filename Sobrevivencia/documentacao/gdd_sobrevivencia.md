@@ -357,11 +357,15 @@ Ao equipar pelo menos uma relíquia ativa:
 A interface do jogo passou por uma reformulação técnica completa para melhorar a legibilidade e o "game feel".
 
 ### 11.1 Tecnologias de UI
-- **Pygame-GUI:** Utilizado para menus complexos (Inventário, Mercado Negro), permitindo janelas flutuantes e scroll real.
+- **Pygame-GUI:** Utilizado em um "Design System Modular" para as telas de Inventário, Mercado Negro, Upgrades, Seleção de Personagem, Modos e Configurações. As janelas modais nativas agora gerenciam pop-ups de confirmação, barras de rolagem nativas e imagens sobrepostas vetoriais, substituindo os antigos canvas absolutos.
 - **Pygame Freetype:** Substituiu o sistema de fontes legado, permitindo renderização de texto em alta qualidade, rotação e efeitos de contorno sem perda de performance.
 - **Animation Manager (Tweening):** Sistema centralizado baseado em `pytweening` que gerencia transições suaves, números flutuantes de dano e efeitos de "pop" em elementos da interface.
 
-### 11.2 HUD e Telas
+### 11.2 Regras de Navegação
+- **Voltar ao Menu:** Redireciona o jogador para a tela inicial do modo `Sobrevivência`, mantendo o jogo ativo na memória para recomeços rápidos, sem fechar a aplicação principal.
+- **Fechar (Quit / X):** Encerra a sessão da aplicação ativa devolvendo o fluxo para o Arcade de Jogos raiz.
+
+### 11.3 HUD e Telas
 - **Feedback de Munição:** Mensagens flutuantes "RECARREGANDO" ou "SEM MUNIÇÃO" com efeito de pulso sobre o jogador.
 - **Dano Flutuante:** Números que sobem e desaparecem com curvas de suavização (Ease Out).
 - **Miras Coloridas:** Mira azul para P1 e vermelha para P2, com ponteiros específicos para joystick.
@@ -373,13 +377,24 @@ A interface do jogo passou por uma reformulação técnica completa para melhora
 ### 12.1 Dependências
 - `pygame` (Core)
 - `pygame-ce` (Opcional, recomendado para performance)
-- `pygame_gui` (Sistemas de menu)
+- `pygame_gui` (Sistemas de menu modulares)
 - `pytweening` (Animações)
 
 ### 12.2 Organização de Código
 - `presentation/animation_manager.py`: Orquestra todas as interpolações temporais.
-- `presentation/menus/`: Subdiretório contendo classes específicas para cada sistema (HUD, InventoryGUI, etc).
+- `presentation/menus/`: Contém os componentes de UI modulares (como `ui_components.py`, que atua como Factory para botões, painéis, caixas de texto e superfícies).
 - `core/game_logic.py`: Mantém a separação entre lógica pura e visual, comunicando-se com a UI via eventos.
+- `core/managers/buff_applicator.py`: O novo coração do sistema matemático de itens.
+
+### 12.3 Status Injetados e Buff Applicator
+O `buff_applicator.py` centraliza a matemática de escala dos itens. Em vez de o jogo consultar o inventário a cada frame (o que antes causava quedas bruscas de performance), as funções embutem valores pré-calculados nas seguintes variáveis diretamente no objeto `Player` após o equip/desequip/upgrade:
+- `item_speed_bonus`: Multiplicador de velocidade acumulativo de itens.
+- `item_damage_bonus`: Bônus direto em ataques e armas.
+- `item_attack_rate_bonus`: Aceleração da cadência base.
+- `item_sword_range_bonus`: Extensão do hitbox e arco da espada.
+- `item_guardian_reduction`: Fração redutora de dano pré-calculada do item `guardian_plate`.
+
+Esses bônus de itens somam-se separadamente aos bônus permanentes ganhos pelo ganho de nível.
 
 ---
 

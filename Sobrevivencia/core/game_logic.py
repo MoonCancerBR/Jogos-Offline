@@ -26,6 +26,7 @@ from .managers.combat_manager import CombatManager
 from .managers.enemy_manager import EnemyManager
 from .managers.item_manager import ItemManager
 from .managers.quest_manager import QuestManager
+from .managers.buff_applicator import ensure_item_bonus_fields, recalc_item_buffs
 
 class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
     def __init__(self, char_class="vanguard", char_class_2="vanguard", multiplayer=False):
@@ -43,9 +44,9 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
             self.inventories = [self.inventory, self.inventory2]
             self.shared_coins = 0
             # XP Compartilhado
-            self.shared_level = 1
+            self.shared_level = 25
             self.shared_xp = 0
-            self.shared_xp_to_next = int(40 + 25 * 1)
+            self.shared_xp_to_next = int(40 + 25 * 25)
             self.draft_active = False
             self.draft_turn_player = 0  # 0 ou 1
             self.draft_first_picker = 0 # Alterna a cada nível
@@ -55,7 +56,23 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
             self.players = [self.player]
             self.inventories = [self.inventory]
             self.shared_coins = 0
-            self.shared_level = 1 # Para compatibilidade
+            self.shared_level = 25 # Para compatibilidade
+
+        # Debug start values for easy testing (Level 25, 60 points, Level 10 Relic)
+        for p in self.players:
+            p.level = 25
+            p.xp_to_next = int(40 + 25 * 25)
+        
+        for inv in self.inventories:
+            inv.points = 60
+            status, item = inv.add_relic("blade_relay+chrono_boots+guardian_plate+magnet_orb")
+            if item:
+                item.level = 10
+            inv.check_black_market_unlock()
+            
+        for i, p in enumerate(self.players):
+            ensure_item_bonus_fields(p)
+            recalc_item_buffs(p, self.inventories[i])
         self.camera = Vector2(
             self.player.pos.x - SCREEN_WIDTH * 0.5,
             self.player.pos.y - SCREEN_HEIGHT * 0.5,
@@ -115,6 +132,8 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
         # Setup Players Physics
         for p in self.players:
             self._setup_physics_entity(p, is_player=True)
+            # Garante que os campos item_*_bonus existem mesmo antes do primeiro recalc
+            ensure_item_bonus_fields(p)
 
     def restart(self):
         self.__init__(self.char_class, self.char_class_2, self.multiplayer)

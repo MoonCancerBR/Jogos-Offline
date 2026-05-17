@@ -410,12 +410,13 @@ class CombatManager:
         )
 
     def incoming_damage_multiplier(self):
-        guardian = self.item_level("guardian_plate")
-        if guardian <= 0:
+        """Multiplicador de dano recebido para self.player (single-player helper)."""
+        guardian_reduction = self.player.item_guardian_reduction
+        if guardian_reduction <= 0:
             return 1.0
         if self.player.health / self.player.max_health > 0.42:
             return 1.0
-        return max(0.52, 1.0 - (0.10 + guardian * 0.022))
+        return max(0.52, 1.0 - (0.10 + guardian_reduction))
 
     def _auto_attack(self, dt, aim_world):
         self._auto_attack_for(dt, aim_world, self.player)
@@ -727,11 +728,11 @@ class CombatManager:
     def _damage_player_direct(self, player, amount, source="hit"):
         if amount <= 0 or player.shield_timer > 0 or player.invulnerable_timer > 0:
             return False
-        inv = self.get_inventory(player.player_index)
-        guardian = inv.active_effect_level("guardian_plate")
+        # Usa o bônus de guardian_plate pré-calculado pelo buff_applicator
+        guardian_reduction = getattr(player, "item_guardian_reduction", 0.0)
         mult = 1.0
-        if guardian > 0 and player.health / player.max_health <= 0.42:
-            mult = max(0.52, 1.0 - (0.10 + guardian * 0.022))
+        if guardian_reduction > 0 and player.health / player.max_health <= 0.42:
+            mult = max(0.52, 1.0 - (0.10 + guardian_reduction))
         player.health -= amount * mult
         if amount >= 1:
             self.add_floater(player.pos, f"-{int(amount)}", COLORS["danger"])

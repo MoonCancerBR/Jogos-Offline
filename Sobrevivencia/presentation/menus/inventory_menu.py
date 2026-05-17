@@ -212,12 +212,25 @@ class InventoryMenu:
         # pygame.display.flip()
         return buttons
 
-    def render_point_confirm(self, game, cost, message, selected, mouse_pos):
+    def render_point_confirm(
+        self,
+        game,
+        cost,
+        message,
+        selected,
+        mouse_pos,
+        quantity=1,
+        max_quantity=1,
+        total_cost=None,
+    ):
+        total_cost = cost if total_cost is None else total_cost
+        quantity_enabled = max_quantity > 1
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((5, 10, 18, 176))
         self.screen.blit(overlay, (0, 0))
 
-        panel = pygame.Rect(SCREEN_WIDTH // 2 - 250, SCREEN_HEIGHT // 2 - 120, 500, 240)
+        panel_h = 300 if quantity_enabled else 240
+        panel = pygame.Rect(SCREEN_WIDTH // 2 - 250, SCREEN_HEIGHT // 2 - panel_h // 2, 500, panel_h)
         pygame.draw.rect(self.screen, (9, 15, 26), panel, border_radius=8)
         pygame.draw.rect(self.screen, hex_color(COLORS["xp"]), panel, width=2, border_radius=8)
 
@@ -229,10 +242,18 @@ class InventoryMenu:
             y += 24
 
         buttons = []
-        actions = [(f"Confirmar ({cost} pts)", "point_confirm_yes", COLORS["xp"]), ("Cancelar", "point_confirm_no", COLORS["muted_2"])]
+        if quantity_enabled:
+            q_text = f"Quantidade: {quantity}/{max_quantity}    Total: {total_cost} pts"
+            self._center_text(q_text, self.font, panel.y + 160, COLORS["text"])
+            buttons.append(self._button(panel.centerx - 120, panel.y + 190, 64, 34, "-", "point_confirm_decrease", mouse_pos, COLORS["muted_2"]))
+            self._center_text(f"x{quantity}", self.font, panel.y + 195, COLORS["text"])
+            buttons.append(self._button(panel.centerx + 56, panel.y + 190, 64, 34, "+", "point_confirm_increase", mouse_pos, COLORS["muted_2"]))
+
+        actions_y = panel.bottom - 60
+        actions = [(f"Confirmar ({total_cost} pts)", "point_confirm_yes", COLORS["xp"]), ("Cancelar", "point_confirm_no", COLORS["muted_2"])]
         for index, (label, action, color) in enumerate(actions):
             button_color = COLORS["upgrade"] if index == selected else color
-            buttons.append(self._button(panel.x + 60 + index * 200, panel.bottom - 60, 180, 40, label, action, mouse_pos, button_color))
+            buttons.append(self._button(panel.x + 60 + index * 200, actions_y, 180, 40, label, action, mouse_pos, button_color))
 
         return buttons
 

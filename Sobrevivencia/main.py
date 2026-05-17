@@ -129,6 +129,10 @@ class SobrevivenciaGame(InputManager, MenuController):
         self.point_confirm_msg = ""
         self.point_confirm_return = ""
         self.point_confirm_selected = 1
+        self.point_confirm_quantity = 1
+        self.point_confirm_max_quantity = 1
+        self.point_confirm_total_cost = 0
+        self._point_confirm_action_marker = None
         game_over_selected = 0
         stat_shop_selected = 0
         inventory_tab = "items"
@@ -189,22 +193,170 @@ class SobrevivenciaGame(InputManager, MenuController):
                 p2_aim_screen = self._aim_screen_pos_for(game, game.player2, joystick_aim_dir)
                 p2_aim_world = ui.screen_to_world(p2_aim_screen, game.camera)
 
+            ui.sync_menu_windows(state)
             for event in self._poll_events(game):
                 self._prepare_input_event(event)
                 ui.gui_manager.process_events(event)
                 if state == "inventory":
-                    ui.handle_inventory_event(event)
+                    action = ui.handle_inventory_event(event)
+                    if action:
+                        if action.startswith("inventory_tab:"):
+                            inventory_tab = action.split(":", 1)[1]
+                            inventory_selected = 0
+                        elif action == "toggle_menu_player":
+                            game.menu_player_index = 1 - game.menu_player_index
+                            inventory_selected = 0
+                        elif action.startswith("shop_select:"):
+                            inventory_selected = int(action.split(":", 1)[1])
+                        elif action == "shop_buy":
+                            shop_keys = list(BASE_ITEM_KEYS)
+                            if inventory_selected < len(shop_keys):
+                                cost = 15
+                                if game.get_inventory(game.menu_player_index).points >= cost:
+                                    self.point_confirm_action = ("buy_shop_item", shop_keys[inventory_selected])
+                                    self.point_confirm_cost = cost
+                                    self.point_confirm_msg = f"Deseja gastar {cost} moedas para comprar este item?"
+                                    self.point_confirm_return = "inventory"
+                                    self.point_confirm_selected = 1
+                                    state = "point_confirm"
+                                else:
+                                    game.message = f"Pontos insuficientes (custa {cost})."
+                        elif action == "item_transform":
+                            inv = game.get_inventory(game.menu_player_index)
+                            raw_items = inv.item_list()
+                            active_items = [item for item in raw_items if inv.is_active(item.slot_key)]
+                            reserve_items = [item for item in raw_items if not inv.is_active(item.slot_key)]
+                            items = active_items + reserve_items
+                            if inventory_selected < len(items):
+                                item = items[inventory_selected]
+                                cost = 15
+                                if item.rank == 1 and item.level >= 10 and inv.black_market_unlocked:
+                                    if inv.points >= cost:
+                                        self.point_confirm_action = ("transform_inventory", item.slot_key)
+                                        self.point_confirm_cost = cost
+                                        self.point_confirm_msg = "Deseja gastar 15 moedas para tentar a Transformacao (Risco de Degradacao)?"
+                                        self.point_confirm_return = "inventory"
+                                        self.point_confirm_selected = 1
+                                        state = "point_confirm"
+                                    else:
+                                        game.message = f"Pontos insuficientes (custa {cost})."
+                                else:
+                                    game.message = "Transformacao bloqueada ou requisitos nao atendidos."
+                        else:
+                            state, inventory_selected = self._handle_inventory_action(action, state, game, inventory_selected)
+                            if state == "fusion_confirm":
+                                fusion_confirm_selected = 1
+                        continue
+                elif state == "point_confirm":
+                    action = ui.handle_inventory_event(event)
+                    if action:
+                        state = self._handle_point_confirm_choice(action, game)
+                        continue
+                elif state in ("stat_shop", "skills", "upgrade"):
+                    new_state = ui.handle_shop_menus_event(event, game)
+                    if new_state:
+                        if state == "skills":
+                            if new_state == "skills_toggle_player":
+                                game.menu_player_index = 1 - game.menu_player_index
+                                skill_selected = 0
+                            else:
+                                state, skill_selected = self._handle_skill_action(
+                                    new_state,
+                                    state,
+                                    game,
+                                    skill_selected,
+                                    skills_return_state,
+                                )
+                        elif state == "stat_shop":
+                            state = self._handle_stat_shop_action(new_state, game, stat_shop_return_state)
+                        else:
+                            state = new_state
+                elif state == "paused":
+                    action = ui.handle_system_menus_event(event, game)
+                    if action:
+                        if action == "commands":
+                            commands_return_state = "paused"
+                            state = "commands"
+                        elif action == "settings":
+                            settings_return_state = "paused"
+                            state = "settings"
+                            capture_binding = None
+                        elif action == "skills":
+                            skills_return_state = "paused"
+                            state = "skills"
+                            game.menu_player_index = 0
+                            skill_selected = min(skill_selected, max(0, len(game.get_player(0).passives) - 1))
+                        elif action == "stat_shop":
+                            stat_shop_return_state = "paused"
+                            state = "stat_shop"
+                            stat_shop_selected = 0
+                        elif action == "change_character":
+                            character_selected = self._current_character_index(game)
+                            character_selected_2 = self._current_character_index(game, 1)
+                            multiplayer_selected = game.multiplayer
+                            character_select_player = 0
+                            character_cancel_state = "paused"
+                            state = "character_select"
+                        else:
+                            state, running, return_action, pause_selected, upgrade_selected = self._handle_action(
+                                action,
+                                state,
+                                game,
+                                running,
+                                return_action,
+                                pause_selected,
+                                upgrade_selected,
+                            )
+                        continue
+                elif state == "start":
+                    action = ui.handle_system_menus_event(event, game)
+                    if action:
+                        if action == "character_select":
+                            state = "mode_select" if self._joystick_count() else "character_select"
+                            character_selected = 0
+                            character_selected_2 = 0
+                            character_select_player = 0
+                            multiplayer_selected = False
+                            character_cancel_state = "start"
+                        elif action == "commands":
+                            commands_return_state = "start"
+                            state = "commands"
+                        elif action == "settings":
+                            settings_return_state = "start"
+                            state = "settings"
+                            capture_binding = None
+                        elif action == "menu":
+                            return_action = "menu"
+                            running = False
+                        elif action == "quit":
+                            return_action = "quit"
+                            running = False
+                        continue
+                elif state == "game_over":
+                    action = ui.handle_system_menus_event(event, game)
+                    if action == "restart":
+                        game.restart()
+                        state = "playing"
+                    elif action == "change_character":
+                        character_selected = self._current_character_index(game)
+                        character_selected_2 = self._current_character_index(game, 1)
+                        multiplayer_selected = game.multiplayer
+                        character_select_player = 0
+                        character_cancel_state = "game_over"
+                        state = "character_select"
+                    elif action == "menu":
+                        running = False
+                        return_action = "menu"
+                    elif action == "quit":
+                        running = False
+                        return_action = "quit"
 
                 if event.type == pygame.QUIT:
                     return_action = "menu"
                     running = False
                     break
 
-                if state in ("start", "paused"):
-                    menu_manager.update([event])
-                    continue
-
-                elif event.type == pygame.JOYDEVICEADDED:
+                if event.type == pygame.JOYDEVICEADDED:
                     self._add_joystick(event.device_index)
                     self._apply_default_joystick_bindings(controls)
                     aim_mode = "joystick"
@@ -332,10 +484,7 @@ class SobrevivenciaGame(InputManager, MenuController):
                                     state, inventory_selected = self._handle_fusion_confirm_action(action, game, inventory_selected)
                                     break
                                 if state == "point_confirm":
-                                    if action == "self.point_confirm_yes":
-                                        state = self._handle_point_confirm_action(self.point_confirm_action, game, self.point_confirm_return)
-                                    elif action == "self.point_confirm_no":
-                                        state = self.point_confirm_return
+                                    state = self._handle_point_confirm_choice(action, game)
                                     break
                                 if action == "toggle_menu_player" and state in ("inventory", "skills"):
                                     game.menu_player_index = 1 - game.menu_player_index
@@ -759,14 +908,21 @@ class SobrevivenciaGame(InputManager, MenuController):
                             inventory_selected = max(0, min(inventory_selected, len(items) - 1))
 
                     elif state == "point_confirm":
+                        self._refresh_point_confirm_quantity(game)
                         if self._menu_back_pressed():
+                            self._clear_point_confirm_quantity()
                             state = self.point_confirm_return
+                        elif self._point_confirm_has_quantity() and self._menu_left_pressed():
+                            self._adjust_point_confirm_quantity(-1, game)
+                        elif self._point_confirm_has_quantity() and self._menu_right_pressed():
+                            self._adjust_point_confirm_quantity(1, game)
                         elif self._menu_left_pressed() or self._menu_right_pressed() or self._menu_up_pressed() or self._menu_down_pressed():
                             self.point_confirm_selected = 1 - self.point_confirm_selected
                         elif self._menu_confirm_pressed():
                             if self.point_confirm_selected == 0:
                                 state = self._handle_point_confirm_action(self.point_confirm_action, game, self.point_confirm_return)
                             else:
+                                self._clear_point_confirm_quantity()
                                 state = self.point_confirm_return
 
                     elif state == "fusion_confirm":
@@ -1323,8 +1479,14 @@ class SobrevivenciaGame(InputManager, MenuController):
                             state, inventory_selected = self._handle_fusion_confirm_action(action, game, inventory_selected)
 
                     elif state == "point_confirm":
+                        self._refresh_point_confirm_quantity(game)
                         if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE, pygame.K_n):
+                            self._clear_point_confirm_quantity()
                             state = self.point_confirm_return
+                        elif self._point_confirm_has_quantity() and event.key == pygame.K_LEFT:
+                            self._adjust_point_confirm_quantity(-1, game)
+                        elif self._point_confirm_has_quantity() and event.key == pygame.K_RIGHT:
+                            self._adjust_point_confirm_quantity(1, game)
                         elif event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN):
                             self.point_confirm_selected = 1 - self.point_confirm_selected
                         elif event.key in (pygame.K_y,):
@@ -1333,6 +1495,7 @@ class SobrevivenciaGame(InputManager, MenuController):
                             if self.point_confirm_selected == 0:
                                 state = self._handle_point_confirm_action(self.point_confirm_action, game, self.point_confirm_return)
                             else:
+                                self._clear_point_confirm_quantity()
                                 state = self.point_confirm_return
 
                     elif state == "game_over":
@@ -1350,6 +1513,7 @@ class SobrevivenciaGame(InputManager, MenuController):
                             running = False
                             return_action = "menu"
 
+            ui.sync_menu_windows(state)
             if state == "playing":
                 # Combo Suprema: hold dedicado em combo_special
                 if combo_holding[0]:
@@ -1377,11 +1541,7 @@ class SobrevivenciaGame(InputManager, MenuController):
                 ui.render_game(game, aim_pos, dt=dt, flip=False, aim_from_joystick=aim_mode == "joystick", p2_aim_pos=p2_aim_screen)
                 button_rects = []
             elif state == "start":
-                self.virtual_screen.fill(COLORS["bg"])
-                ui._draw_menu_background()
-                menu_manager.set_active('start')
-                menu_manager.draw()
-                button_rects = []
+                button_rects = ui.render_start(mouse_pos, start_selected)
             elif state == "mode_select":
                 button_rects = ui.render_mode_select(mouse_pos, mode_selected, self._joystick_count())
             elif state == "character_select":
@@ -1396,10 +1556,7 @@ class SobrevivenciaGame(InputManager, MenuController):
                     character_select_player,
                 )
             elif state == "paused":
-                ui.render_game(game, aim_pos, dt=dt, flip=False)
-                menu_manager.set_active('pause')
-                menu_manager.draw()
-                button_rects = []
+                button_rects = ui.render_pause(game, PAUSE_OPTIONS, pause_selected, mouse_pos)
             elif state == "commands":
                 button_rects = ui.render_commands(mouse_pos, self._command_lines(controls))
             elif state == "settings":
@@ -1430,7 +1587,7 @@ class SobrevivenciaGame(InputManager, MenuController):
                     inventory_selected = min(inventory_selected, max(0, len(list(BASE_ITEM_KEYS)) - 1))
                 else:
                     inventory_selected = min(inventory_selected, max(0, len(inv.item_list()) - 1))
-                button_rects = ui.render_inventory(game, inventory_selected, mouse_pos, inventory_tab)
+                button_rects = ui.render_inventory_gui(game, inventory_selected, mouse_pos, inventory_tab)
             elif state == "fusion_confirm":
                 inventory_selected = min(inventory_selected, max(0, len(game.get_inventory(game.menu_player_index).item_list()) - 1))
                 button_rects = ui.render_fusion_confirm(game, inventory_selected, fusion_confirm_selected, mouse_pos)
@@ -1440,8 +1597,18 @@ class SobrevivenciaGame(InputManager, MenuController):
                 elif self.point_confirm_return == "skills":
                     ui.render_skills(game, skill_selected, mouse_pos)
                 elif self.point_confirm_return == "inventory":
-                    ui.render_inventory(game, inventory_selected, mouse_pos, inventory_tab)
-                button_rects = ui.render_point_confirm(game, self.point_confirm_cost, self.point_confirm_msg, self.point_confirm_selected, mouse_pos)
+                    ui.render_inventory_gui(game, inventory_selected, mouse_pos, inventory_tab)
+                self._refresh_point_confirm_quantity(game)
+                button_rects = ui.render_point_confirm(
+                    game,
+                    self.point_confirm_cost,
+                    self.point_confirm_msg,
+                    self.point_confirm_selected,
+                    mouse_pos,
+                    self.point_confirm_quantity,
+                    self.point_confirm_max_quantity,
+                    self.point_confirm_total_cost,
+                )
             elif state == "game_over":
                 button_rects = ui.render_game_over(game, mouse_pos, game_over_selected)
 

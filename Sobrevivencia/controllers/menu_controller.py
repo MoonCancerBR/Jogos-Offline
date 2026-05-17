@@ -1,10 +1,130 @@
 import pygame
 if __package__:
     from ..data.constants import *
+    from ..data.items import MAX_ITEM_LEVEL
 else:
     from Sobrevivencia.data.constants import *
+    from Sobrevivencia.data.items import MAX_ITEM_LEVEL
 
 class MenuController:
+    def _refresh_point_confirm_quantity(self, game):
+        action = getattr(self, "point_confirm_action", None)
+        marker = repr(action)
+        if getattr(self, "_point_confirm_action_marker", None) != marker:
+            self.point_confirm_quantity = 1
+            self._point_confirm_action_marker = marker
+
+        max_quantity = self._point_confirm_max_quantity(action, game)
+        self.point_confirm_max_quantity = max(1, max_quantity)
+        self.point_confirm_quantity = max(
+            1,
+            min(getattr(self, "point_confirm_quantity", 1), self.point_confirm_max_quantity),
+        )
+        self.point_confirm_total_cost = self._point_confirm_total_cost(
+            action,
+            game,
+            self.point_confirm_quantity,
+        )
+
+    def _point_confirm_max_quantity(self, action, game):
+        if not action:
+            return 1
+
+        act = action[0]
+        if act == "buy_shop_item":
+            inv = game.get_inventory(game.menu_player_index)
+            return max(1, inv.points // 15)
+
+        if act == "upgrade_inventory":
+            inv = game.get_inventory(game.menu_player_index)
+            item = inv.get(action[1])
+            if item is None or item.level >= MAX_ITEM_LEVEL:
+                return 1
+            cost = 7 if item.is_relic else (3 if item.is_hybrid else 1)
+            return max(1, min(MAX_ITEM_LEVEL - item.level, inv.points // cost))
+
+        if act == "upgrade_skill":
+            player = game.get_player(game.menu_player_index)
+            inv = game.get_inventory(game.menu_player_index)
+            key = action[1]
+            level = player.passives.get(key, 0)
+            if level >= 10:
+                return 1
+
+            points = inv.points
+            quantity = 0
+            while level + quantity < 10:
+                step_cost = self._skill_step_cost(game, key, level + quantity)
+                if points < step_cost:
+                    break
+                points -= step_cost
+                quantity += 1
+            return max(1, quantity)
+
+        return 1
+
+    def _point_confirm_total_cost(self, action, game, quantity):
+        if not action:
+            return getattr(self, "point_confirm_cost", 0)
+
+        act = action[0]
+        if act in ("buy_shop_item", "upgrade_inventory"):
+            return getattr(self, "point_confirm_cost", 0) * quantity
+
+        if act == "upgrade_skill":
+            player = game.get_player(game.menu_player_index)
+            key = action[1]
+            level = player.passives.get(key, 0)
+            return sum(self._skill_step_cost(game, key, level + step) for step in range(quantity))
+
+        return getattr(self, "point_confirm_cost", 0)
+
+    def _skill_step_cost(self, game, key, level):
+        player = game.get_player(game.menu_player_index)
+        data = CHARACTERS[player.char_class]["passives"].get(key, {})
+        is_special = data.get("category") == "Especial"
+        if level <= 0:
+            return SPECIAL_SKILL_UNLOCK_COST if is_special else SKILL_UNLOCK_COST
+        return SPECIAL_SKILL_UPGRADE_COST if is_special else SKILL_UPGRADE_COST
+
+    def _point_confirm_has_quantity(self):
+        return getattr(self, "point_confirm_max_quantity", 1) > 1
+
+    def _clear_point_confirm_quantity(self):
+        self.point_confirm_quantity = 1
+        self.point_confirm_max_quantity = 1
+        self.point_confirm_total_cost = getattr(self, "point_confirm_cost", 0)
+        self._point_confirm_action_marker = None
+
+    def _adjust_point_confirm_quantity(self, delta, game):
+        self._refresh_point_confirm_quantity(game)
+        if not self._point_confirm_has_quantity():
+            return
+        self.point_confirm_quantity = max(
+            1,
+            min(self.point_confirm_quantity + delta, self.point_confirm_max_quantity),
+        )
+        self.point_confirm_total_cost = self._point_confirm_total_cost(
+            self.point_confirm_action,
+            game,
+            self.point_confirm_quantity,
+        )
+
+    def _handle_point_confirm_choice(self, action, game):
+        self._refresh_point_confirm_quantity(game)
+        if action == "point_confirm_decrease":
+            self._adjust_point_confirm_quantity(-1, game)
+            return "point_confirm"
+        if action == "point_confirm_increase":
+            self._adjust_point_confirm_quantity(1, game)
+            return "point_confirm"
+        if action == "point_confirm_yes":
+            return self._handle_point_confirm_action(self.point_confirm_action, game, self.point_confirm_return)
+        if action == "point_confirm_no":
+            self._clear_point_confirm_quantity()
+            return self.point_confirm_return
+        return "point_confirm"
+
     def _set_display_mode(self, fullscreen, ui):
         attempts = []
         if fullscreen:
@@ -36,6 +156,7 @@ class MenuController:
         if not action:
             return return_state
         act = action[0]
+        quantity = getattr(self, "point_confirm_quantity", 1)
         if act == "roll_stat_shop":
             game.roll_stat_shop()
         elif act == "purchase_stat_shop":
@@ -43,11 +164,29 @@ class MenuController:
         elif act == "reroll_stat_shop":
             game.reroll_stat_shop_offer(action[1])
         elif act == "upgrade_skill":
-            game.upgrade_skill(action[1])
+            done = 0
+            for _ in range(quantity):
+                if not game.upgrade_skill(action[1]):
+                    break
+                done += 1
+            if done > 1:
+                game.message = f"Skill aprimorada {done} vezes."
         elif act == "upgrade_inventory":
-            game.upgrade_inventory_item(action[1])
+            done = 0
+            for _ in range(quantity):
+                if not game.upgrade_inventory_item(action[1]):
+                    break
+                done += 1
+            if done > 1:
+                game.message = f"Item aprimorado {done} vezes."
         elif act == "buy_shop_item":
-            game.buy_shop_item(action[1])
+            done = 0
+            for _ in range(quantity):
+                if not game.buy_shop_item(action[1]):
+                    break
+                done += 1
+            if done > 1:
+                game.message = f"Compra realizada {done} vezes."
         elif act == "transform_inventory":
             inv = game.get_inventory(game.menu_player_index)
             success, msg = inv.attempt_transformation(action[1], game.random)
@@ -56,6 +195,7 @@ class MenuController:
             inv = game.get_inventory(game.menu_player_index)
             success, msg = inv.sell_item(action[1])
             game.message = msg
+        self._clear_point_confirm_quantity()
         return return_state
 
     def _current_character_index(self, game, player_index=0):
@@ -90,9 +230,10 @@ class MenuController:
             game.restart()
             state = "playing"
         elif action == "menu":
-            return_action = "menu"
-            running = False
+            # "Voltar ao Menu" dentro da partida: retorna ao menu inicial do jogo sem encerrar
+            state = "start"
         elif action == "quit":
+            # "Fechar": encerra a sessao e retorna ao Arcade
             return_action = "quit"
             running = False
         elif action in game.upgrade_choices:
@@ -104,8 +245,8 @@ class MenuController:
     def _handle_inventory_action(self, action, state, game, selected):
         inv = game.get_inventory(game.menu_player_index)
         raw_items = inv.item_list()
-        active_items = [item for item in raw_items if inv.is_active(item.key)]
-        reserve_items = [item for item in raw_items if not inv.is_active(item.key)]
+        active_items = [item for item in raw_items if inv.is_active(item.slot_key)]
+        reserve_items = [item for item in raw_items if not inv.is_active(item.slot_key)]
         items = active_items + reserve_items
         if action == "resume":
             return "playing", selected
@@ -115,13 +256,13 @@ class MenuController:
             return state, selected
 
         selected = min(selected, len(items) - 1)
-        key = items[selected].key
+        slot_key = items[selected].slot_key
         if action == "item_toggle":
-            game.toggle_inventory_item(key)
+            game.toggle_inventory_item(slot_key)
         elif action == "item_upgrade":
             cost = 7 if items[selected].is_relic else (3 if items[selected].is_hybrid else 1)
             if inv.points >= cost:
-                self.point_confirm_action = ("upgrade_inventory", key)
+                self.point_confirm_action = ("upgrade_inventory", slot_key)
                 self.point_confirm_cost = cost
                 self.point_confirm_msg = f"Deseja gastar {cost} ponto(s) para aprimorar este item?"
                 self.point_confirm_return = "inventory"
@@ -130,7 +271,7 @@ class MenuController:
             else:
                 game.message = f"Pontos insuficientes (custa {cost})."
         elif action == "item_fuse":
-            game.mark_or_fuse_item(key)
+            game.mark_or_fuse_item(slot_key)
             if game.has_pending_fusion():
                 return "fusion_confirm", selected
             selected = min(selected, max(0, len(inv.item_list()) - 1))

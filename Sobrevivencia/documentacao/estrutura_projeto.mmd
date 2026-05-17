@@ -57,6 +57,10 @@ graph TD
       draft de level-up, revive, input lock
     • Gerenciamento de Skills e Loja de Status"]
 
+    CORE --> BUFF_APP["📄 managers/buff_applicator.py
+    [CE] Matemática central de injeção de itens
+    no status base dos jogadores"]
+
     CORE --> ENTITIES["📄 entities.py
     [CE] Dataclasses puras (sem lógica de jogo):
     • Player — stats, armas, especiais, passivas
@@ -113,25 +117,25 @@ graph TD
     PRESENTATION --> PRES_INIT["📄 __init__.py"]
 
     PRESENTATION --> UI["📄 ui.py
-    [UI] Toda a renderização visual:
-    • HUD singleplayer e coop (dual panel)
-    • Menu principal e seleção de personagem
-    • Pause (continuar, skills, construções,
-      configurações, trocar personagem)
-    • Tela de level-up com draft P1/P2
-    • Inventário com indicador de jogador ativo
-    • Gerenciamento de Skills
-    • Loja de Status (roletar, ofertas, rerroll)
-    • Tela de Construções (tier 1/2/3, árvore)
-    • Confirmação de fusão + preview
-    • Comandos e Configurações (remapear)
-    • Game Over (stats, reinício, trocar char)
-    • Fullscreen via smoothscale (1100×720 → nativo)
-    • Aura de fogo (relíquias ativas)"]
+    [UI] Hub principal de renderização:
+    • Loop de desenho do Terreno e Jogo
+    • Integra o HUD e repassa eventos ao pygame_gui"]
+
+    PRESENTATION --> MENUS_DIR["📁 menus/
+    [UI] Componentes Modulares e Telas:
+    • hud.py (Game HUD Overlay)
+    • ui_components.py (Design System Factory)
+    • shop_menus.py (Upgrades, Construções)
+    • inventory_gui.py (Inventário, Mercado Negro)
+    • system_menus.py (Start, Pause, Character)"]
 
     %% ── ASSETS ────────────────────────────────────────────
     ROOT --> ASSETS["📁 assets/
     Recursos visuais e sonoros — sem lógica Python"]
+
+    ASSETS --> THEME["📄 theme.json
+    [AS] Tokens de UI (Cores, fontes, estilos)
+    utilizados pelo motor pygame_gui"]
 
     ASSETS --> ITEMS_DIR["📁 items/
     [AS] Ícones PNG dos itens passivos (32×32):
@@ -218,9 +222,9 @@ graph TD
 
     class ROOT rootNode
     class MAIN,INIT_ROOT,GDD entry
-    class CORE,CORE_INIT,GAME_LOGIC,ENTITIES,WORLD coreNode
+    class CORE,CORE_INIT,GAME_LOGIC,BUFF_APP,ENTITIES,WORLD coreNode
     class DATA,DATA_INIT,CONSTANTS,CONSTANTS_BKP,ITEMS dataNode
-    class PRESENTATION,PRES_INIT,UI presNode
+    class PRESENTATION,PRES_INIT,UI,MENUS_DIR presNode
     class ASSETS,ITEMS_DIR,SPRITES,SFX,BGM,FONTS assetNode
     class CONFIG,SETTINGS,BALANCE,KEYBINDS cfgNode
     class TOOLS,PROFILER,BAL_EDITOR toolNode

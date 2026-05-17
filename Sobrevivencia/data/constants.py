@@ -618,7 +618,7 @@ PAUSE_OPTIONS = [
     ("Construcoes", "constructions"),
     ("Comandos", "commands"),
     ("Configuracoes", "settings"),
-    ("Trocar Personagem", "change_character"),
+    ("Mudar Modo de Jogo", "change_character"),
     ("Reiniciar", "restart"),
     ("Voltar ao Menu", "menu"),
     ("Fechar", "quit"),

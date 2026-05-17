@@ -10,6 +10,7 @@
 %%    [EM]  Enemy Manager
 %%    [IM]  Item Manager
 %%    [QM]  Quest Manager
+%%    [BA]  Buff Applicator
 %%
 %%  =========================================================
 
@@ -55,11 +56,19 @@ graph TD
     • Falhas e recompensas
     • Timers de Quests"]
 
+    MANAGERS --> BUFF["📄 buff_applicator.py
+    [BA] BuffApplicator
+    Responsável por:
+    • Cálculo de escala de níveis
+    • Injeção de status base no Player
+    • Acúmulo de bônus do inventário"]
+
     %% ── RELACIONAMENTOS (Mixins) ──────────────────────────────
     COMBAT -- "Herdado por" --> ROOT
     ENEMY -- "Herdado por" --> ROOT
     ITEM -- "Herdado por" --> ROOT
     QUEST -- "Herdado por" --> ROOT
+    BUFF -- "Injetado no" --> ROOT
 
     %% ── ESTILOS ────────────────────────────────────────────
     classDef rootNode  fill:#0f172a,stroke:#cbd5e1,color:#f1f5f9
@@ -68,6 +77,7 @@ graph TD
     classDef enemyNode fill:#2a2000,stroke:#fbbf24,color:#fef9c3
     classDef itemNode fill:#1a3322,stroke:#4ade80,color:#dcfce7
     classDef questNode fill:#2d1b4e,stroke:#a78bfa,color:#ede9fe
+    classDef buffNode fill:#1a2333,stroke:#60a5fa,color:#e0f2fe
 
     class ROOT rootNode
     class MANAGERS managerDir
@@ -75,3 +85,4 @@ graph TD
     class ENEMY enemyNode
     class ITEM itemNode
     class QUEST questNode
+    class BUFF buffNode

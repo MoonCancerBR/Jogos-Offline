@@ -641,7 +641,7 @@ class HudMenu:
         max_speed = player.base_speed * game.effective_speed_multiplier_for(player)
         terrain_speed = max_speed * terrain["speed"]
         fire_rate = game.effective_attack_rate_multiplier_for(player, inv) / PROJECTILE_COOLDOWN
-        w, h = self._s(STATS_PANEL_W), self._s(156 if compact else 166)
+        w, h = self._s(STATS_PANEL_W), self._s(204 if compact else 214)
         rect = pygame.Rect(x, y, w, h)
 
         self._draw_panel_back(rect, alpha=210, border=(51, 65, 85), radius=6)
@@ -655,6 +655,9 @@ class HudMenu:
             ("Alcance espada", f"{game.sword_radius_for(player, inv):.0f}"),
             ("Ritmo tiro", f"{fire_rate:.1f}/s"),
             ("Balas/salva", str(1 + player.passives.get("multishot", 0))),
+            ("Vampirismo", f"{player.passives.get('vampirism', 0) * 10}%"),
+            ("Pente Extra", f"+{player.passives.get('magazine', 0)}"),
+            ("Recarga Rapida", f"-{player.passives.get('reload_speed', 0)}s"),
         ]
 
         label_w = self._s(128)

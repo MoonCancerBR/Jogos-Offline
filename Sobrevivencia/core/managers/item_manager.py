@@ -5,10 +5,12 @@ if __package__:
     from ...data.constants import *
     from ..entities import Drop
     from ...data.items import item_display_name, RELIC_DEFINITIONS
+    from .buff_applicator import recalc_item_buffs, ensure_item_bonus_fields
 else:
     from Sobrevivencia.data.constants import *
     from Sobrevivencia.core.entities import Drop
     from Sobrevivencia.data.items import item_display_name, RELIC_DEFINITIONS
+    from Sobrevivencia.core.managers.buff_applicator import recalc_item_buffs, ensure_item_bonus_fields
 
 class ItemManager:
     def _update_item_system(self, dt):
@@ -195,6 +197,7 @@ class ItemManager:
 
     def grant_random_item(self, player_index=0):
         inv = self.get_inventory(player_index)
+        player = self.get_player(player_index)
         # 0.5% chance of pre-defined relic drop
         if self.random.random() < 0.005:
             relic_source_key = self.random.choice(list(RELIC_DEFINITIONS.keys()))
@@ -203,6 +206,9 @@ class ItemManager:
                 name = item_display_name(item)
                 self.message = f"RELIQUIA LENDARIA encontrada: {name}!"
                 self.screen_shake = max(self.screen_shake, 14.0)
+                # Recalc buffs pois o item pode ter ido automaticamente para slot ativo
+                ensure_item_bonus_fields(player)
+                recalc_item_buffs(player, inv)
                 return
 
         result, item = inv.add_random_item(self.random)
@@ -219,6 +225,10 @@ class ItemManager:
         else:
             inv.points += 1
             self.message = f"{name} ja esta no maximo. +1 ponto de item."
+
+        # Sempre recalcula buffs após mudança no inventário
+        ensure_item_bonus_fields(player)
+        recalc_item_buffs(player, inv)
 
     def _grant_random_reward(self, pos, strong=False, player_index=0):
         pos = Vector2(pos)
@@ -464,12 +474,20 @@ class ItemManager:
     def toggle_inventory_item(self, key):
         inv = self.get_inventory(self.menu_player_index)
         success, message = inv.toggle_active(key)
+        if success:
+            player = self.get_player(self.menu_player_index)
+            ensure_item_bonus_fields(player)
+            recalc_item_buffs(player, inv)
         self.message = message
         return success
 
     def upgrade_inventory_item(self, key):
         inv = self.get_inventory(self.menu_player_index)
         success, message = inv.upgrade_with_point(key)
+        if success:
+            player = self.get_player(self.menu_player_index)
+            ensure_item_bonus_fields(player)
+            recalc_item_buffs(player, inv)
         self.message = message
         return success
 
@@ -483,6 +501,10 @@ class ItemManager:
         inv.points -= cost
         status, item = inv.add_item(item_key)
         self.message = f"Item {item.key} adquirido no Mercado Negro!"
+        # Recalc buffs
+        player = self.get_player(self.menu_player_index)
+        ensure_item_bonus_fields(player)
+        recalc_item_buffs(player, inv)
         return True
 
     def skill_upgrade_cost(self, key):
@@ -537,6 +559,10 @@ class ItemManager:
         success, message = inv.fuse_marked_items()
         if success:
             inv.points -= FUSION_COST
+            # Recalcula buffs: a fusão substitui itens nos slots ativos
+            player = self.get_player(self.menu_player_index)
+            ensure_item_bonus_fields(player)
+            recalc_item_buffs(player, inv)
         self.message = message
         return success
 
@@ -545,10 +571,23 @@ class ItemManager:
         inv.clear_fusion_marks()
         self.message = "Fusao cancelada."
 
+    # Incremento fixo por nível para cada atributo do player (separado da Loja de Status)
+    # Valores calibrados para dar progressão leve mas perceptível sem inflacionar demais.
+    _LEVEL_UP_STAT_INCREMENTS = {
+        "max_health":   8,       # flat HP por nível
+        "damage":       0.008,   # +0.8% dano por nível
+        "speed":        0.005,   # +0.5% velocidade por nível
+        "attack_rate":  0.006,   # +0.6% cadência por nível
+        "sword_range":  0.004,   # +0.4% alcance por nível
+        "special_gain": 0.005,   # +0.5% carga especial por nível
+        # vampirism, magazine e reload_speed NÃO crescem automaticamente por nível;
+        # são adquiridos explicitamente via Loja de Status.
+    }
+
     def _apply_level_up_stats(self, player):
-        for stat in STAT_SHOP_STATS:
-            val = 0.01 if stat["kind"] == "percent" else 1.0
-            self._apply_stat_shop_effect(stat["key"], val, player)
+        """Aplica incremento calibrado de atributos por level-up no player."""
+        for key, val in self._LEVEL_UP_STAT_INCREMENTS.items():
+            self._apply_stat_shop_effect(key, val, player)
 
     def add_xp(self, amount, player=None):
         if player is None:

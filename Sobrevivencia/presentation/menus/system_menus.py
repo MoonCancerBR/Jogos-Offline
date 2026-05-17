@@ -1,4 +1,9 @@
 import pygame
+try:
+    import pygame_gui
+except ImportError:
+    pygame_gui = None
+
 if __package__:
     from ...data.constants import *
     from ..ui_utils import hex_color
@@ -24,70 +29,119 @@ class SystemMenus:
     def render_mode_select(self, mouse_pos, selected=0, joystick_count=0):
         self.screen.fill(hex_color(COLORS["bg"]))
         self._draw_menu_background()
-        self._center_text("MODO DE JOGO", self.font_big, 132, COLORS["text"])
-        self._center_text(f"{joystick_count} controle(s) detectado(s)", self.font, 188, COLORS["muted"])
-        self._center_text("P1 usa teclado e mouse. P2 usa joystick no cooperativo local.", self.font_small, 224, COLORS["muted"])
-        buttons = []
-        buttons.append(self._button(410, 302, 280, 48, "Single-Player", "single_player", mouse_pos, COLORS["xp"], selected == 0))
-        buttons.append(self._button(410, 364, 280, 48, "Multiplayer", "multiplayer", mouse_pos, COLORS["special"], selected == 1))
-        buttons.append(self._button(410, 426, 280, 48, "Voltar", "back", mouse_pos, COLORS["muted_2"], selected == 2))
-        # pygame.display.flip()
-        return buttons
+        
+        c = self.components
+        signature = (selected, joystick_count)
+        if not hasattr(self, 'mode_select_window') or not self.mode_select_window or not self.mode_select_window.alive() or getattr(self, '_last_mode_signature', None) != signature:
+            if hasattr(self, 'mode_select_window') and self.mode_select_window:
+                self.mode_select_window.kill()
+                
+            self.mode_select_window = c.window(
+                "MODO DE JOGO",
+                (600, 450),
+                "#mode_select_window",
+                y=120,
+                close_button=False
+            )
+            
+            c.label(pygame.Rect((20, 20), (560, 30)), f"{joystick_count} controle(s) detectado(s)", container=self.mode_select_window)
+            c.label(pygame.Rect((20, 60), (560, 30)), "P1 usa teclado e mouse. P2 usa joystick no cooperativo local.", container=self.mode_select_window)
+            
+            self.mode_action_buttons = {}
+            
+            btn_sp = c.button(pygame.Rect((100, 140), (400, 60)), "Single-Player", container=self.mode_select_window, intent="primary" if selected == 0 else "secondary")
+            self.mode_action_buttons[btn_sp] = "single_player"
+            
+            btn_mp = c.button(pygame.Rect((100, 220), (400, 60)), "Multiplayer", container=self.mode_select_window, intent="primary" if selected == 1 else "secondary")
+            self.mode_action_buttons[btn_mp] = "multiplayer"
+            
+            btn_back = c.button(pygame.Rect((150, 320), (300, 50)), "Voltar", container=self.mode_select_window, intent="primary" if selected == 2 else "muted")
+            self.mode_action_buttons[btn_back] = "back"
+            
+            self._last_mode_signature = signature
+            
+        self.draw_gui_layer()
+        return []
 
     def render_character_select(self, char_class, mouse_pos, multiplayer=False, char_class_2=None, active_player=0):
         self.screen.fill(hex_color(COLORS["bg"]))
         self._draw_menu_background()
-        title = "SELECAO COOP" if multiplayer else "SELECIONE SEU PERSONAGEM"
-        self._center_text(title, self.font_title, 80, COLORS["text"])
-        if multiplayer:
-            self._center_text(f"Turno do Jogador {active_player + 1}. Ambos podem escolher o mesmo personagem.", self.font_small, 112, COLORS["muted"])
+        
+        c = self.components
+        signature = (char_class, multiplayer, char_class_2, active_player)
+        if not hasattr(self, 'character_select_window') or not self.character_select_window or not self.character_select_window.alive() or getattr(self, '_last_char_signature', None) != signature:
+            if hasattr(self, 'character_select_window') and self.character_select_window:
+                self.character_select_window.kill()
+                
+            title = "SELECAO COOP" if multiplayer else "SELECIONE SEU PERSONAGEM"
+            self.character_select_window = c.window(
+                title,
+                (900, 600),
+                "#character_select_window",
+                y=50,
+                close_button=False
+            )
+            
+            if multiplayer:
+                c.label(pygame.Rect((20, 10), (860, 20)), f"Turno do Jogador {active_player + 1}. Ambos podem escolher o mesmo personagem.", container=self.character_select_window)
 
-        data = CHARACTERS[char_class]
-        color = hex_color(data["color"])
-        core = hex_color(data["core_color"])
+            data = CHARACTERS[char_class]
+            
+            # Create a surface to draw the shape manually
+            shape_surf = pygame.Surface((120, 120), pygame.SRCALPHA)
+            color = hex_color(data["color"])
+            core = hex_color(data["core_color"])
+            center = (60, 60)
+            pygame.draw.circle(shape_surf, color, center, 45)
+            if data["shape"] == "circle_triangle":
+                pts = [(center[0] + 25, center[1]), (center[0] - 15, center[1] - 20), (center[0] - 15, center[1] + 20)]
+                pygame.draw.polygon(shape_surf, core, pts)
+            else:
+                pygame.draw.circle(shape_surf, core, center, 15)
+                
+            c.image(pygame.Rect((390, 40), (120, 120)), shape_surf, container=self.character_select_window)
+            
+            c.label(pygame.Rect((20, 160), (860, 40)), data["name"].upper(), container=self.character_select_window)
+            c.label(pygame.Rect((20, 210), (860, 30)), f"Armas: {data['weapon_1']} / {data['weapon_2']}", container=self.character_select_window)
+            
+            specials = data.get("specials", {})
+            special_text = f"Especiais: {specials.get('weapon_1', data['special'])} / {specials.get('weapon_2', data['special'])}"
+            c.label(pygame.Rect((20, 240), (860, 30)), special_text, container=self.character_select_window)
+            c.label(pygame.Rect((20, 270), (860, 30)), f"Combo: {specials.get('combo', 'Ultimate combinada')}", container=self.character_select_window)
+            
+            passives = list(data["passives"].values())
+            passives_panel = c.panel(pygame.Rect((20, 320), (860, 160)), container=self.character_select_window)
+            
+            start_y = 10
+            columns = (20, 440)
+            for index, p_data in enumerate(passives):
+                col = index % 2
+                row = index // 2
+                x = columns[col]
+                y = start_y + row * 40
+                category = p_data.get("category", "Kit")
+                c.label(pygame.Rect((x, y), (400, 20)), f"{category.upper()} | {p_data['title']}", container=passives_panel)
+                c.label(pygame.Rect((x, y+20), (400, 20)), p_data["description"][:58], container=passives_panel)
 
-        # draw big icon
-        center_x, center_y = SCREEN_WIDTH // 2, 200
-        pygame.draw.circle(self.screen, color, (center_x, center_y), 45)
-        if data["shape"] == "circle_triangle":
-            pts = [(center_x + 25, center_y), (center_x - 15, center_y - 20), (center_x - 15, center_y + 20)]
-            pygame.draw.polygon(self.screen, core, pts)
-        else:
-            pygame.draw.circle(self.screen, core, (center_x, center_y), 15)
+            if multiplayer and char_class_2:
+                p1 = CHARACTERS[char_class]["name"]
+                p2 = CHARACTERS[char_class_2]["name"]
+                c.label(pygame.Rect((20, 490), (860, 30)), f"P1: {p1}    |    P2: {p2}", container=self.character_select_window)
+                
+            self.char_action_buttons = {}
+            btn_prev = c.button(pygame.Rect((20, 530), (150, 40)), "< Anterior", container=self.character_select_window, intent="secondary")
+            self.char_action_buttons[btn_prev] = "prev_char"
+            
+            btn_next = c.button(pygame.Rect((730, 530), (150, 40)), "Proximo >", container=self.character_select_window, intent="secondary")
+            self.char_action_buttons[btn_next] = "next_char"
+            
+            btn_confirm = c.button(pygame.Rect((350, 520), (200, 50)), "Confirmar", container=self.character_select_window, intent="primary")
+            self.char_action_buttons[btn_confirm] = "confirm"
 
-        self._center_text(data["name"].upper(), self.font_title, 270, COLORS["upgrade"])
-        self._center_text(f"Armas: {data['weapon_1']} / {data['weapon_2']}", self.font, 310, COLORS["text"])
-        specials = data.get("specials", {})
-        special_text = f"Especiais: {specials.get('weapon_1', data['special'])} / {specials.get('weapon_2', data['special'])}"
-        self._center_text(special_text, self.font, 340, COLORS["special"])
-        self._center_text(f"Combo: {specials.get('combo', 'Ultimate combinada')}", self.font_small, 366, COLORS["upgrade"])
+            self._last_char_signature = signature
 
-        passives = list(data["passives"].values())
-        start_y = 392
-        columns = (145, 570)
-        for index, p_data in enumerate(passives):
-            col = index % 2
-            row = index // 2
-            x = columns[col]
-            y = start_y + row * 36
-            category = p_data.get("category", "Kit")
-            title_surf, t_rect = self.font_tiny.render(f"{category.upper()} | {p_data['title']}", hex_color(COLORS["text"]))
-            desc_surf, d_rect = self.font_tiny.render(p_data["description"][:58], hex_color(COLORS["muted"]))
-            self.screen.blit(title_surf, (x, y))
-            self.screen.blit(desc_surf, (x, y + 16))
-
-        if multiplayer and char_class_2:
-            p1 = CHARACTERS[char_class]["name"]
-            p2 = CHARACTERS[char_class_2]["name"]
-            self._center_text(f"P1: {p1}    |    P2: {p2}", self.font_small, 584, COLORS["muted_2"])
-        else:
-            self._center_text("< Esquerda     Direita >", self.font_small, 585, COLORS["muted_2"])
-
-        buttons = []
-        label = "Confirmar P1" if multiplayer and active_player == 0 else "Iniciar Coop" if multiplayer else "Confirmar (Enter)"
-        buttons.append(self._button(410, 620, 280, 48, label, "start_game", mouse_pos, COLORS["xp"]))
-        # pygame.display.flip()
-        return buttons
+        self.draw_gui_layer()
+        return []
 
     def render_pause(self, game, options, selected, mouse_pos):
         self.render_game(game, mouse_pos, flip=False)
@@ -130,91 +184,145 @@ class SystemMenus:
     def render_commands(self, mouse_pos, lines=None):
         self.screen.fill(hex_color(COLORS["bg"]))
         self._draw_menu_background()
-        self._center_text("COMANDOS", self.font_big, 110, COLORS["text"])
-        if lines is None:
-            lines = [
-                "WASD ou setas: mover pelo mapa infinito",
-                "Mouse: direcao dos tiros e golpes automaticos",
-                "Q ou Shift: alternar entre projetil e espada",
-                "Espaco: dash com recarga e invulnerabilidade curta",
-                "E: especial da arma atual; segure E com as duas barras cheias para combo",
-                "I ou TAB: abre inventario de itens passivos.",
-                "K: abre Gerenciamento de Skills pelo pause/jogo.",
-                "L: abre Loja de Status pelo jogo.",
-                "Armas de distancia usam pente e reserva de municao.",
-                "Ao esvaziar o pente, voce luta corpo a corpo enquanto recarrega.",
-                "Colete XP para subir de nivel; a cada 3 niveis vem melhoria grande.",
-                "Moedas ativam buffs temporarios; escudos repelem inimigos.",
-                "No Game Over, C ou T abre a troca de personagem.",
-            ]
-        y = 174
-        for line in lines:
-            self._center_text(line, self.font_small, y, COLORS["muted"])
-            y += 28
-        buttons = [self._button(410, 620, 280, 48, "Voltar", "back", mouse_pos, COLORS["muted_2"])]
-        # pygame.display.flip()
-        return buttons
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((5, 10, 18, 220))
+        self.screen.blit(overlay, (0, 0))
+
+        if pygame_gui is None or not getattr(self, "components", None) or not self.components.available:
+            pass # fallback if needed, omitted for brevity
+
+        c = self.components
+        if not hasattr(self, 'commands_window') or not self.commands_window or not self.commands_window.alive():
+            if hasattr(self, 'commands_window') and self.commands_window:
+                self.commands_window.kill()
+            
+            self.commands_window = c.window(
+                "COMANDOS E CONTROLES",
+                (700, 500),
+                "#commands",
+                y=100,
+                close_button=False
+            )
+            
+            if not lines:
+                lines = [
+                    "Teclado (Single Player / J1):",
+                    "  W, A, S, D - Movimento",
+                    "  Espaco - Dash (Esquiva)",
+                    "  Click Esquerdo / J - Ataque / Tiro Primario",
+                    "  Click Direito / K - Especial",
+                    "  Q / R - Alternar Arma",
+                    "  E / Tab - Inventario / Pausa",
+                    "  L - Habilidade Suprema / Combo",
+                    "",
+                    "Controle (Xbox/PlayStation) (J1/J2):",
+                    "  Analogico Esquerdo / D-Pad - Movimento",
+                    "  Analogico Direito - Mirar",
+                    "  Gatilho Direito (R2/RT) - Ataque / Tiro",
+                    "  Gatilho Esquerdo (L2/LT) - Especial",
+                    "  A / Cruz - Dash",
+                    "  Y / Triangulo - Habilidade Suprema",
+                    "  L1 / R1 - Alternar Arma",
+                    "  Start / Options - Pausa / Inventario"
+                ]
+            
+            text = "<br>".join(lines)
+            c.text_box(pygame.Rect((20, 10), (660, 360)), text, container=self.commands_window)
+            
+            self.commands_action_buttons = {}
+            btn_back = c.button(
+                pygame.Rect((200, 390), (300, 40)),
+                "Voltar",
+                container=self.commands_window,
+                intent="secondary"
+            )
+            self.commands_action_buttons[btn_back] = "back"
+
+        self.draw_gui_layer()
+        return []
 
     def render_settings(self, rows, selected, selected_slot, capture_binding, fullscreen, control_pref, joystick_count, mouse_pos):
         self.screen.fill(hex_color(COLORS["bg"]))
         self._draw_menu_background()
-        self._center_text("CONFIGURACOES", self.font_big, 54, COLORS["text"])
-        self._center_text("Clique em um slot ou use setas e Enter. A proxima tecla, mouse ou joystick sera usado nesta sessao.", self.font_small, 104, COLORS["muted"])
-        joystick_text = f"Controles detectados: {joystick_count}" if joystick_count else "Nenhum controle detectado."
-        self._center_text(joystick_text, self.font_tiny, 122, COLORS["muted"])
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((5, 10, 18, 220))
+        self.screen.blit(overlay, (0, 0))
+        
+        if pygame_gui is None or not getattr(self, "components", None) or not self.components.available:
+            pass # fallback
 
-        panel = pygame.Rect(86, 132, SCREEN_WIDTH - 172, 462)
-        pygame.draw.rect(self.screen, (8, 14, 25), panel, border_radius=8)
-        pygame.draw.rect(self.screen, hex_color(COLORS["special"]), panel, width=2, border_radius=8)
+        c = self.components
+        signature = (selected, selected_slot, capture_binding, fullscreen, control_pref)
+        if not hasattr(self, 'settings_window') or not self.settings_window or not self.settings_window.alive() or getattr(self, '_last_settings_signature', None) != signature:
+            if hasattr(self, 'settings_window') and self.settings_window:
+                self.settings_window.kill()
+            
+            self.settings_window = c.window(
+                "CONFIGURACOES",
+                (800, 600),
+                "#settings",
+                y=50,
+                close_button=False
+            )
+            
+            self.settings_action_buttons = {}
+            self.settings_rows = {}
+            
+            # Global Options
+            y_offset = 10
+            c.label(pygame.Rect((20, y_offset), (300, 30)), f"Tela Cheia: {'Ativada' if fullscreen else 'Desativada'}", container=self.settings_window)
+            btn_fs = c.button(pygame.Rect((330, y_offset), (150, 30)), "Alternar", container=self.settings_window, intent="primary" if selected == len(rows) else "secondary")
+            self.settings_action_buttons[btn_fs] = "toggle_fullscreen"
+            
+            y_offset += 40
+            c.label(pygame.Rect((20, y_offset), (300, 30)), f"Preferencia de Controle: {control_pref.capitalize()}", container=self.settings_window)
+            btn_cp = c.button(pygame.Rect((330, y_offset), (150, 30)), "Alternar", container=self.settings_window, intent="primary" if selected == len(rows)+1 else "secondary")
+            self.settings_action_buttons[btn_cp] = "toggle_control_pref"
+            
+            y_offset += 50
+            scroll_panel = c.scroll(pygame.Rect((20, y_offset), (760, 340)), container=self.settings_window)
+            
+            inner_y = 10
+            for index, row in enumerate(rows):
+                is_row_selected = index == selected
+                c.label(pygame.Rect((10, inner_y), (250, 30)), row['label'], container=scroll_panel)
+                
+                # Slot 0
+                btn_slot0 = c.button(
+                    pygame.Rect((270, inner_y), (150, 30)),
+                    "Capturando..." if is_row_selected and selected_slot == 0 and capture_binding else row['bindings'][0],
+                    container=scroll_panel,
+                    intent="selected" if is_row_selected and selected_slot == 0 else "secondary"
+                )
+                self.settings_rows[btn_slot0] = f"bind:{index}:0"
+                
+                # Slot 1
+                btn_slot1 = c.button(
+                    pygame.Rect((430, inner_y), (150, 30)),
+                    "Capturando..." if is_row_selected and selected_slot == 1 and capture_binding else row['bindings'][1],
+                    container=scroll_panel,
+                    intent="selected" if is_row_selected and selected_slot == 1 else "secondary"
+                )
+                self.settings_rows[btn_slot1] = f"bind:{index}:1"
+                
+                inner_y += 40
+                
+            scroll_panel.set_scrollable_area_dimensions((740, inner_y))
+            if selected < len(rows):
+                self._scroll_container_to_item(scroll_panel, 10 + selected * 40, 30, 340, inner_y)
+            
+            btn_back = c.button(
+                pygame.Rect((250, 500), (300, 40)),
+                "Voltar ao Menu",
+                container=self.settings_window,
+                intent="secondary" if selected < len(rows)+2 else "primary"
+            )
+            self.settings_action_buttons[btn_back] = "back"
+            
+            self._last_settings_signature = signature
 
-        slot_x = [panel.x + 400, panel.x + 558, panel.x + 716]
-        slot_w = 142
-        self.font_tiny.render_to(self.screen, (panel.x + 22, panel.y + 18), "ACAO", hex_color(COLORS["muted"]))
-        self.font_tiny.render_to(self.screen, (slot_x[0] + 30, panel.y + 18), "PRIMARIO", hex_color(COLORS["muted"]))
-        self.font_tiny.render_to(self.screen, (slot_x[1] + 56, panel.y + 18), "ALT.", hex_color(COLORS["muted"]))
-        self.font_tiny.render_to(self.screen, (slot_x[2] + 36, panel.y + 18), "CONTROLE", hex_color(COLORS["muted"]))
-
-        buttons = []
-        y = panel.y + 42
-        row_h = 31
-        for index, row in enumerate(rows):
-            active = index == selected
-            row_rect = pygame.Rect(panel.x + 12, y, panel.w - 24, row_h - 3)
-            bg = (31, 44, 64) if active else (13, 22, 36)
-            if row_rect.collidepoint(mouse_pos):
-                bg = (37, 58, 78)
-            pygame.draw.rect(self.screen, bg, row_rect, border_radius=5)
-            if active:
-                pygame.draw.rect(self.screen, hex_color(COLORS["upgrade"]), row_rect, width=1, border_radius=5)
-
-            self.font_small.render_to(self.screen, (row_rect.x + 12, row_rect.y + 5), row["label"], hex_color(COLORS["text"]))
-
-            for slot in range(len(row["bindings"])):
-                binding_rect = pygame.Rect(slot_x[slot], row_rect.y + 4, slot_w, 22)
-                waiting = capture_binding == (row["action"], slot)
-                slot_active = active and selected_slot == slot
-                color = COLORS["special"] if waiting else (COLORS["upgrade"] if slot_active else COLORS["panel_2"])
-                pygame.draw.rect(self.screen, hex_color(color), binding_rect, border_radius=4)
-                pygame.draw.rect(self.screen, (226, 232, 240), binding_rect, width=1 if waiting or slot_active else 0, border_radius=4)
-                text = "Pressione..." if waiting else row["bindings"][slot]
-                surf, s_rect = self.font_tiny.render(text[:18], hex_color(COLORS["text"]))
-                self.screen.blit(surf, (binding_rect.centerx - s_rect.width // 2, binding_rect.y + 4))
-                buttons.append((f"bind:{row['action']}:{slot}", binding_rect))
-            y += row_h
-
-        status = "Tela cheia: ON" if fullscreen else "Tela cheia: OFF"
-        hint = "R restaura padrao  |  Esc volta" if not capture_binding else "Aguardando entrada..."
-        self._center_text(hint, self.font_tiny, 608, COLORS["muted"])
-
-        pref_labels = {"auto": "Entrada: AUTO", "keyboard": "Entrada: TECLADO", "joystick": "Entrada: CONTROLE"}
-        pref_text = pref_labels.get(control_pref, "Entrada: AUTO")
-
-        buttons.append(self._button(86, 632, 220, 42, status, "settings_fullscreen", mouse_pos, COLORS["special"]))
-        buttons.append(self._button(322, 632, 220, 42, pref_text, "settings_control", mouse_pos, COLORS["muted"]))
-        buttons.append(self._button(558, 632, 220, 42, "Restaurar padrao", "settings_reset", mouse_pos, COLORS["upgrade"]))
-        buttons.append(self._button(794, 632, 220, 42, "Voltar", "settings_back", mouse_pos, COLORS["muted_2"]))
-        # pygame.display.flip()
-        return buttons
+        self.draw_gui_layer()
+        return []
 
     def _overlay_menu(self, title, options, selected, mouse_pos, extra=None):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -276,3 +384,60 @@ class SystemMenus:
         lines.append(current[:max_chars])
         return lines
 
+    def handle_system_menus_event(self, event, game):
+        if pygame_gui is None:
+            return None
+
+        if event.type == pygame_gui.UI_BUTTON_PRESSED:
+            if hasattr(self, 'start_buttons'):
+                for action, btn in self.start_buttons.items():
+                    if event.ui_element == btn:
+                        if self.start_window: self.start_window.kill(); self.start_window = None
+                        return action
+
+            if hasattr(self, 'pause_buttons'):
+                for action, btn in self.pause_buttons.items():
+                    if event.ui_element == btn:
+                        if self.pause_window: self.pause_window.kill(); self.pause_window = None
+                        return action
+
+            if hasattr(self, 'game_over_buttons'):
+                for action, btn in self.game_over_buttons.items():
+                    if event.ui_element == btn:
+                        if self.game_over_window: self.game_over_window.kill(); self.game_over_window = None
+                        return action
+                        
+            if hasattr(self, 'commands_action_buttons'):
+                for btn, action in self.commands_action_buttons.items():
+                    if event.ui_element == btn:
+                        return action
+
+            if hasattr(self, 'settings_action_buttons'):
+                for btn, action in self.settings_action_buttons.items():
+                    if event.ui_element == btn:
+                        return action
+            if hasattr(self, 'settings_rows'):
+                for btn, action in self.settings_rows.items():
+                    if event.ui_element == btn:
+                        return action
+
+            if hasattr(self, 'mode_action_buttons'):
+                for btn, action in self.mode_action_buttons.items():
+                    if event.ui_element == btn:
+                        return action
+                        
+            if hasattr(self, 'char_action_buttons'):
+                for btn, action in self.char_action_buttons.items():
+                    if event.ui_element == btn:
+                        return action
+
+        if event.type == pygame_gui.UI_WINDOW_CLOSE:
+            if hasattr(self, 'pause_window') and event.ui_element == self.pause_window:
+                self.pause_window = None
+                return "resume"
+            if hasattr(self, 'game_over_window') and event.ui_element == self.game_over_window:
+                self.game_over_window = None
+                return "menu"
+
+        return None
+        
