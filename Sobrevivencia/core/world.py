@@ -7,10 +7,12 @@ if __package__:
     from ..config.runtime import njit_or_python as njit, optional_import
     from ..data.constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
     from .entities import Destructible, Hazard, RectBody
+    from .physics import SimplePhysicsBackend
 else:
     from Sobrevivencia.config.runtime import njit_or_python as njit, optional_import
     from Sobrevivencia.data.constants import CHUNK_SIZE, ICE_SPEED_MULTIPLIER, TERRAIN_TYPES, VIEW_PADDING, WORLD_TILE_SIZE
     from Sobrevivencia.core.entities import Destructible, Hazard, RectBody
+    from Sobrevivencia.core.physics import SimplePhysicsBackend
 
 pytmx = optional_import("pytmx")
 
@@ -41,10 +43,11 @@ def circle_rect_overlap(cx, cy, radius, rect):
 
 
 class World:
-    def __init__(self):
+    def __init__(self, physics_backend=None):
         self.chunks = {}
         self.tmx_data = None
         self.use_tmx = False
+        self.physics = physics_backend or SimplePhysicsBackend()
 
     def load_tmx(self, filename):
         if pytmx is None:
@@ -323,27 +326,13 @@ class World:
         return resolved
 
     def _circle_rect_correction(self, pos, radius, rect):
-        closest_x = max(rect.left, min(pos.x, rect.right))
-        closest_y = max(rect.top, min(pos.y, rect.bottom))
-        offset = Vector2(pos.x - closest_x, pos.y - closest_y)
-        distance_sq = offset.length_squared()
-
-        if distance_sq >= radius * radius:
-            return Vector2(0, 0)
-        if distance_sq > 0.0001:
-            distance = math.sqrt(distance_sq)
-            return offset * ((radius - distance + 0.05) / distance)
-
-        distances = [
-            (abs(pos.x - rect.left), Vector2(rect.left - radius - 0.05 - pos.x, 0)),
-            (abs(rect.right - pos.x), Vector2(rect.right + radius + 0.05 - pos.x, 0)),
-            (abs(pos.y - rect.top), Vector2(0, rect.top - radius - 0.05 - pos.y)),
-            (abs(rect.bottom - pos.y), Vector2(0, rect.bottom + radius + 0.05 - pos.y)),
-        ]
-        return min(distances, key=lambda entry: entry[0])[1]
+        return self.physics.circle_rect_correction(pos, radius, rect)
 
     def circle_hits_wall(self, pos, radius, include_destructibles=True):
-        return any(circle_rect_overlap(pos.x, pos.y, radius, rect) for rect in self.nearby_solid_rects(pos.x, pos.y, radius, include_destructibles))
+        return any(
+            self.physics.circle_rect_overlap(pos.x, pos.y, radius, rect)
+            for rect in self.nearby_solid_rects(pos.x, pos.y, radius, include_destructibles)
+        )
 
     def remove_destructible(self, item):
         chunk = self.ensure_chunk(*item.chunk)

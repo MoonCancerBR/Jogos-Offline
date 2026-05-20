@@ -153,6 +153,10 @@ class HudMenu:
         self._draw_quest_panel(game, x=side_x, y=self._s(72), w=side_w, compact=True)
         stats_rect = self._draw_stats_panel(game, y=hud_h + self._s(8), compact=True)
         self._draw_buff_list(player, SCREEN_WIDTH - margin, stats_rect.bottom + self._s(8), align_right=True)
+        self._draw_escort_hud(game)
+        self._draw_altar_compass(game)
+        self._draw_game_clock(game)
+        self._draw_heat_gauge(game)
 
     def _draw_coop_hud(self, game):
         margin = self._s(HUD_MARGIN)
@@ -193,6 +197,9 @@ class HudMenu:
         self._draw_buff_list(game.player, margin, left_stats.bottom + self._s(8), align_right=False)
         if getattr(game, "player2", None):
             self._draw_buff_list(game.player2, SCREEN_WIDTH - margin, right_stats.bottom + self._s(8), align_right=True)
+        self._draw_altar_compass(game)
+        self._draw_game_clock(game)
+        self._draw_heat_gauge(game)
 
     def _draw_metric_strip(self, x, y, w, entries, compact=False):
         if w <= 0:
@@ -485,6 +492,73 @@ class HudMenu:
         dash_lbl = "DASH" if dash_fill >= 1.0 else f"{player.dash_cooldown:.1f}s"
         self._mini_cooldown(x + (cell_w + gap) * 3, y, cell_w, h, dash_lbl, dash_fill)
 
+        try:
+            if __package__:
+                from ...data.stamps import stamp_hud_color
+            else:
+                from Sobrevivencia.data.stamps import stamp_hud_color
+                
+            def draw_stamp_tags(w_key, cx, cy):
+                stamps = getattr(player, "weapon_stamps", {}).get(w_key, [])
+                tag_w = self._s(11)
+                tag_h = self._s(8)
+                tag_gap = self._s(2)
+                start_x = cx + (cell_w - (3 * tag_w + 2 * tag_gap)) // 2
+                
+                stamp_abbreviations = {
+                    "impact": "IMP",
+                    "haste": "RAP",
+                    "lifesteal": "VAM",
+                    "blast": "EXP",
+                    "frost": "CON",
+                    "toxic": "VEN",
+                    "caliber": "CAL",
+                    "repulse": "REP",
+                    "junk_grey": "CIN",
+                    "junk_rust": "FER",
+                    "junk_cracked": "QUE"
+                }
+                
+                for i in range(3):
+                    rx = start_x + i * (tag_w + tag_gap)
+                    ry = cy + h + self._s(2)
+                    rect = pygame.Rect(rx, ry, tag_w, tag_h)
+                    
+                    pygame.draw.rect(self.screen, (15, 23, 42), rect, border_radius=1)
+                    pygame.draw.rect(self.screen, (51, 65, 85), rect, width=1, border_radius=1)
+                    
+                    if i < len(stamps):
+                        color_hex = stamp_hud_color(stamps[i])
+                        from Sobrevivencia.presentation.ui_utils import hex_color
+                        color = hex_color(color_hex)
+                        
+                        pygame.draw.rect(self.screen, color, rect, border_radius=1)
+                        
+                        abb = stamp_abbreviations.get(stamps[i].key, stamps[i].key[:3].upper())
+                        
+                        text_color = (255, 255, 255)
+                        if stamps[i].level == 2:
+                            pygame.draw.rect(self.screen, (255, 255, 255), rect, width=1, border_radius=1)
+                        elif stamps[i].level >= 3:
+                            import time, math
+                            pulse = int(170 + 85 * math.sin(time.time() * 8))
+                            pygame.draw.rect(self.screen, (255, pulse, 0), rect, width=1, border_radius=1)
+                            text_color = (255, 244, 0)
+                        
+                        font = self.font_tiny
+                        text_rect = font.get_rect(abb, size=self._s(6))
+                        font.render_to(self.screen, (rx + (tag_w - text_rect.width)//2, ry + (tag_h - text_rect.height)//2), abb, text_color, size=self._s(6))
+                    else:
+                        font = self.font_tiny
+                        text_rect = font.get_rect("-", size=self._s(5))
+                        font.render_to(self.screen, (rx + (tag_w - text_rect.width)//2, ry + (tag_h - text_rect.height)//2), "-", (70, 85, 105), size=self._s(5))
+
+            draw_stamp_tags("weapon_2", x, y)
+            draw_stamp_tags("weapon_1", x + (cell_w + gap), y)
+        except Exception:
+            pass
+
+
     def _draw_equipment_summary(self, inv, x, y, w):
         label_w = self.font_tiny.get_rect("EQP").width
         self.font_tiny.render_to(self.screen, (x, y - self._s(1)), "EQP", hex_color(COLORS["muted"]))
@@ -720,3 +794,219 @@ class HudMenu:
             self.font_tiny.render_to(self.screen, (x + self._s(10), y + self._s(66)), f"{timer_left:.0f}s  +3 niveis", hex_color(tcol))
 
         return rect
+
+    def _draw_escort_hud(self, game):
+        if not getattr(game, 'escort_event_active', False):
+            return
+            
+        import pygame.freetype
+        from pygame.math import Vector2
+        font = pygame.freetype.SysFont('Verdana', self._s(15), bold=True)
+        
+        state = getattr(game, 'escort_state', '')
+        text = 'MISSAO DE ESCOLTA: '
+        border_col = (59, 130, 246, 255)
+        
+        if state == 'seeking_spawn':
+            text += 'Encontre os aliados'
+        elif state == 'escorting':
+            text += 'Leve-os ate a extracao'
+        elif state == 'completed':
+            text = 'MISSAO CUMPRIDA! ' + getattr(game, 'escort_reward_msg', 'Aliados salvos!')
+            border_col = (16, 185, 129, 255)
+        elif state == 'failed':
+            text = 'MISSAO FALHOU! Aliados foram eliminados.'
+            border_col = (239, 68, 68, 255)
+            
+        rect = font.get_rect(text)
+        x = (SCREEN_WIDTH - rect.width) // 2
+        y = self._top_h() + self._s(20)
+        
+        bg_rect = pygame.Rect(x - 20, y - 5, rect.width + 40, rect.height + 10)
+        
+        surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(surface, (20, 20, 40, 210), surface.get_rect(), border_radius=4)
+        pygame.draw.rect(surface, border_col, surface.get_rect(), 2, border_radius=4)
+        self.screen.blit(surface, bg_rect.topleft)
+        
+        font.render_to(self.screen, (x, y), text, (255, 255, 255))
+        
+        if state in ('completed', 'failed'):
+            return
+            
+        center_x = SCREEN_WIDTH // 2
+        center_y = SCREEN_HEIGHT // 2
+        player = game.player
+        if player.is_down and getattr(game, 'multiplayer', False) and getattr(game, 'player2', None):
+            player = game.player2
+            
+        target_pos = None
+        if state == 'seeking_spawn':
+            target_pos = game.escort_spawn_pos
+            color = (59, 130, 246)
+        elif state == 'escorting':
+            target_pos = game.escort_extract_pos
+            color = (16, 185, 129)
+            
+        if target_pos:
+            diff = target_pos - player.pos
+            dist = diff.length()
+            if dist > 350:
+                if dist > 0: diff = diff.normalize()
+                else: diff = Vector2(1, 0)
+                arrow_dist = 180
+                arrow_pos = Vector2(center_x, center_y) + diff * arrow_dist
+                
+                p1 = arrow_pos + diff * 15
+                p2 = arrow_pos + diff.rotate(135) * 12
+                p3 = arrow_pos + diff.rotate(-135) * 12
+                pygame.draw.polygon(self.screen, color, [p1, p2, p3])
+                
+                dist_font = pygame.freetype.SysFont('Verdana', self._s(11), bold=True)
+                dist_text = f'{int(dist//10)}m'
+                dist_rect = dist_font.get_rect(dist_text)
+                dist_font.render_to(self.screen, (int(arrow_pos.x - dist_rect.width//2), int(arrow_pos.y + 15)), dist_text, color)
+
+    def _draw_altar_compass(self, game):
+        if not getattr(game, 'altars', None):
+            return
+        player = game.player
+        if player.is_down and getattr(game, 'multiplayer', False) and getattr(game, 'player2', None):
+            player = game.player2
+            
+        # Find closest active altar
+        active_altars = [a for a in game.altars if a.active]
+        if not active_altars:
+            return
+            
+        closest = min(active_altars, key=lambda a: player.pos.distance_to(a.pos))
+        diff = closest.pos - player.pos
+        dist = diff.length()
+        
+        # Don't draw if the altar is already on the screen (close to the player)
+        if dist < 220:
+            return
+            
+        # Calculate angle
+        angle = math.atan2(diff.y, diff.x)
+        
+        # Center of screen for arrow radius
+        center_x = SCREEN_WIDTH // 2
+        center_y = SCREEN_HEIGHT // 2 + self._s(70)
+        arrow_dist = self._s(130)
+        arrow_pos = Vector2(center_x, center_y) + Vector2(math.cos(angle), math.sin(angle)) * arrow_dist
+        
+        # Altar type colors
+        if closest.kind == "weapon_altar":
+            color = (239, 68, 68) # Red
+        elif closest.kind == "skill_altar":
+            color = (139, 92, 246) # Purple
+        else:
+            color = (245, 158, 11) # Gold
+            
+        diff_norm = diff.normalize() if dist > 0 else Vector2(1, 0)
+        p1 = arrow_pos + diff_norm * self._s(16)
+        p2 = arrow_pos + diff_norm.rotate(135) * self._s(10)
+        p3 = arrow_pos + diff_norm.rotate(-135) * self._s(10)
+        
+        # Draw nice shadow and polygon
+        pygame.draw.polygon(self.screen, (15, 23, 42, 100), [p1 + (1, 1), p2 + (1, 1), p3 + (1, 1)])
+        pygame.draw.polygon(self.screen, color, [p1, p2, p3])
+        pygame.draw.polygon(self.screen, (255, 255, 255), [p1, p2, p3], 1)
+        
+        # Text distance
+        dist_text = f"{int(dist//10)}m"
+        rect = self.font_tiny.get_rect(dist_text)
+        self.font_tiny.render_to(self.screen, (int(arrow_pos.x - rect.width // 2), int(arrow_pos.y + self._s(12))), dist_text, color)
+
+    def _draw_game_clock(self, game):
+        import math
+        total_seconds = int(game.time_alive)
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        
+        phase, rem = game.phase_info
+        rem_sec = int(math.ceil(rem))
+        
+        phase_labels = {
+            "dia": f"DIA: {rem_sec}s",
+            "entardecer": f"TARDE: {rem_sec}s",
+            "noite": f"NOITE: {rem_sec}s",
+            "amanhecer": f"ALVORADA: {rem_sec}s"
+        }
+        phase_str = phase_labels.get(phase, "")
+        
+        phase_colors = {
+            "dia": "#F59E0B",
+            "entardecer": "#F97316",
+            "noite": "#818CF8",
+            "amanhecer": "#22D3EE"
+        }
+        p_color = phase_colors.get(phase, "#38BDF8")
+        
+        w = self._s(120)
+        h = self._s(34)
+        x = SCREEN_WIDTH // 2 - w // 2
+        y = self._s(10)
+        
+        rect = pygame.Rect(x, y, w, h)
+        border_rgb = hex_color(p_color)
+        self._draw_panel_back(rect, alpha=210, border=border_rgb, radius=5)
+        
+        rect_time = self.font_tiny.get_rect(time_str, size=self._s(11))
+        tx = x + (w - rect_time.width) // 2
+        ty = y + self._s(3)
+        self.font_tiny.render_to(self.screen, (tx, ty), time_str, hex_color("#F8FAFC"), size=self._s(11))
+        
+        rect_phase = self.font_tiny.get_rect(phase_str, size=self._s(9))
+        px = x + (w - rect_phase.width) // 2
+        py = y + self._s(18)
+        self.font_tiny.render_to(self.screen, (px, py), phase_str, border_rgb, size=self._s(9))
+
+    def _draw_heat_gauge(self, game):
+        import math
+        heat = getattr(game, "heat_level", 0.0)
+        
+        w = self._s(160)
+        h = self._s(10)
+        x = SCREEN_WIDTH // 2 - w // 2
+        y = self._s(50)
+        
+        bg_rect = pygame.Rect(x - self._s(8), y - self._s(18), w + self._s(16), h + self._s(24))
+        self._draw_panel_back(bg_rect, alpha=160, border=(30, 41, 59), radius=4)
+        
+        label_text = f"AMEACA: {heat:.0f}%"
+        if heat >= 75.0:
+            pulse = 127 + int(128 * math.sin(game.time_alive * 12.0))
+            label_color = (239, 68, 68) if pulse > 127 else (251, 191, 36)
+            label_text = "AMEACA MAXIMA!"
+        else:
+            label_color = (244, 63, 94)
+            
+        rect_lbl = self.font_tiny.get_rect(label_text, size=self._s(8))
+        lx = x + (w - rect_lbl.width) // 2
+        ly = y - self._s(14)
+        self.font_tiny.render_to(self.screen, (lx, ly), label_text, label_color, size=self._s(8))
+        
+        pygame.draw.rect(self.screen, (15, 23, 42), (x, y, w, h), border_radius=3)
+        
+        if heat > 0:
+            fill_w = int((heat / 100.0) * w)
+            if heat < 50.0:
+                r = int(251 + (249 - 251) * (heat / 50.0))
+                g = int(191 + (115 - 191) * (heat / 50.0))
+                b = int(36 + (22 - 36) * (heat / 50.0))
+            else:
+                r = int(249 + (239 - 249) * ((heat - 50.0) / 50.0))
+                g = int(115 + (68 - 115) * ((heat - 50.0) / 50.0))
+                b = int(22 + (68 - 22) * ((heat - 50.0) / 50.0))
+            
+            fill_rect = pygame.Rect(x, y, fill_w, h)
+            pygame.draw.rect(self.screen, (r, g, b), fill_rect, border_radius=3)
+            
+            if heat > 75.0:
+                glow_surf = pygame.Surface((fill_w + 6, h + 6), pygame.SRCALPHA)
+                pygame.draw.rect(glow_surf, (239, 68, 68, 80), (0, 0, fill_w + 6, h + 6), border_radius=4)
+                self.screen.blit(glow_surf, (x - 3, y - 3))

@@ -11,6 +11,7 @@ if __package__:
     from .config.runtime import configure_file_logging, logger
     from .data.constants import *
     from .data.items import BASE_ITEM_KEYS
+    from .data.encyclopedia import ENCYCLOPEDIA_CATEGORIES
     from .core.game_logic import GameLogic
     from .presentation.ui import UI
 else:
@@ -18,6 +19,7 @@ else:
     from Sobrevivencia.config.runtime import configure_file_logging, logger
     from Sobrevivencia.data.constants import *
     from Sobrevivencia.data.items import BASE_ITEM_KEYS
+    from Sobrevivencia.data.encyclopedia import ENCYCLOPEDIA_CATEGORIES
     from Sobrevivencia.core.game_logic import GameLogic
     from Sobrevivencia.presentation.ui import UI
 
@@ -65,6 +67,12 @@ class SobrevivenciaGame(InputManager, MenuController):
             commands_return_state = "start"
             state = "commands"
 
+        def on_encyclopedia_click():
+            nonlocal state, encyclopedia_return_state, encyclopedia_selected
+            encyclopedia_return_state = "start"
+            encyclopedia_selected = 0
+            state = "encyclopedia"
+
         def on_settings_click():
             nonlocal state, settings_return_state, capture_binding
             settings_return_state = "start"
@@ -75,7 +83,7 @@ class SobrevivenciaGame(InputManager, MenuController):
             nonlocal running
             running = False
 
-        menu_manager.create_start_menu(on_start_click, on_commands_click, on_settings_click, on_quit_click)
+        menu_manager.create_start_menu(on_start_click, on_commands_click, on_settings_click, on_quit_click, on_encyclopedia_click)
 
         def on_resume_click():
             nonlocal state
@@ -100,7 +108,13 @@ class SobrevivenciaGame(InputManager, MenuController):
             state = "stat_shop"
             stat_shop_selected = 0
 
-        menu_manager.create_pause_menu(on_resume_click, on_inventory_click, on_skills_click, on_stat_shop_click, on_settings_click, on_quit_click)
+        def on_pause_encyclopedia_click():
+            nonlocal state, encyclopedia_return_state, encyclopedia_selected
+            encyclopedia_return_state = "paused"
+            encyclopedia_selected = 0
+            state = "encyclopedia"
+
+        menu_manager.create_pause_menu(on_resume_click, on_inventory_click, on_skills_click, on_stat_shop_click, on_settings_click, on_quit_click, on_pause_encyclopedia_click)
 
         game = GameLogic()
         controls = self._default_bindings()
@@ -143,6 +157,10 @@ class SobrevivenciaGame(InputManager, MenuController):
         character_select_player = 0
         character_cancel_state = "start"
         commands_return_state = "start"
+        encyclopedia_return_state = "start"
+        encyclopedia_selected = 0
+        encyclopedia_category = "Todos"
+        encyclopedia_query = ""
         skills_return_state = "paused"
         stat_shop_return_state = "paused"
         settings_return_state = "start"
@@ -246,11 +264,35 @@ class SobrevivenciaGame(InputManager, MenuController):
                             state, inventory_selected = self._handle_inventory_action(action, state, game, inventory_selected)
                             if state == "fusion_confirm":
                                 fusion_confirm_selected = 1
+                            elif state == "stamp_fusion_confirm":
+                                fusion_confirm_selected = 1
+                        continue
+                elif state == "stamp_fusion_confirm":
+                    action = ui.handle_inventory_event(event)
+                    if action:
+                        state, inventory_selected = self._handle_stamp_fusion_confirm_action(action, game, inventory_selected)
                         continue
                 elif state == "point_confirm":
                     action = ui.handle_inventory_event(event)
                     if action:
                         state = self._handle_point_confirm_choice(action, game)
+                        continue
+                elif state == "encyclopedia":
+                    action = ui.handle_encyclopedia_event(event)
+                    if action:
+                        if action == "encyclopedia_back":
+                            state = encyclopedia_return_state
+                        elif action == "encyclopedia_clear_search":
+                            encyclopedia_query = ""
+                            encyclopedia_selected = 0
+                        elif action.startswith("encyclopedia_search:"):
+                            encyclopedia_query = action.split(":", 1)[1]
+                            encyclopedia_selected = 0
+                        elif action.startswith("encyclopedia_category:"):
+                            encyclopedia_category = action.split(":", 1)[1]
+                            encyclopedia_selected = 0
+                        elif action.startswith("encyclopedia_select:"):
+                            encyclopedia_selected = int(action.split(":", 1)[1])
                         continue
                 elif state in ("stat_shop", "skills", "upgrade"):
                     new_state = ui.handle_shop_menus_event(event, game)
@@ -277,6 +319,10 @@ class SobrevivenciaGame(InputManager, MenuController):
                         if action == "commands":
                             commands_return_state = "paused"
                             state = "commands"
+                        elif action == "encyclopedia":
+                            encyclopedia_return_state = "paused"
+                            encyclopedia_selected = 0
+                            state = "encyclopedia"
                         elif action == "settings":
                             settings_return_state = "paused"
                             state = "settings"
@@ -321,6 +367,10 @@ class SobrevivenciaGame(InputManager, MenuController):
                         elif action == "commands":
                             commands_return_state = "start"
                             state = "commands"
+                        elif action == "encyclopedia":
+                            encyclopedia_return_state = "start"
+                            encyclopedia_selected = 0
+                            state = "encyclopedia"
                         elif action == "settings":
                             settings_return_state = "start"
                             state = "settings"
@@ -419,8 +469,12 @@ class SobrevivenciaGame(InputManager, MenuController):
 
                     clicked_button = False
                     if event.button == 1:
+                        final_screen = pygame.display.get_surface()
+                        fw, fh = final_screen.get_size()
+                        vw, vh = self.virtual_screen.get_size()
+                        ev_pos = (int(event.pos[0] * vw / fw), int(event.pos[1] * vh / fh)) if (fw != vw or fh != vh) else event.pos
                         for action, rect in button_rects:
-                            if rect.collidepoint(event.pos):
+                            if rect.collidepoint(ev_pos):
                                 clicked_button = True
                                 if state == "settings":
                                     if action == "settings_back":
@@ -446,6 +500,12 @@ class SobrevivenciaGame(InputManager, MenuController):
                                         settings_selected = self._control_index(action_key)
                                         settings_slot = int(slot)
                                         capture_binding = (action_key, settings_slot)
+                                    break
+                                if state == "encyclopedia":
+                                    if action == "encyclopedia_back":
+                                        state = encyclopedia_return_state
+                                    elif action.startswith("encyclopedia_select:"):
+                                        encyclopedia_selected = int(action.split(":", 1)[1])
                                     break
                                 if action == "character_select":
                                     state = "mode_select" if self._joystick_count() else "character_select"
@@ -480,11 +540,23 @@ class SobrevivenciaGame(InputManager, MenuController):
                                     character_select_player = 0
                                     state = "character_select"
                                     break
+                                if action == "encyclopedia":
+                                    encyclopedia_return_state = "paused" if state == "paused" else "start"
+                                    encyclopedia_selected = 0
+                                    state = "encyclopedia"
+                                    break
                                 if state == "fusion_confirm":
                                     state, inventory_selected = self._handle_fusion_confirm_action(action, game, inventory_selected)
                                     break
+                                if state == "stamp_fusion_confirm":
+                                    state, inventory_selected = self._handle_stamp_fusion_confirm_action(action, game, inventory_selected)
+                                    break
                                 if state == "point_confirm":
                                     state = self._handle_point_confirm_choice(action, game)
+                                    break
+                                if state == "rng_result":
+                                    if action == "rng_result_ok":
+                                        state = "playing"
                                     break
                                 if action == "toggle_menu_player" and state in ("inventory", "skills"):
                                     game.menu_player_index = 1 - game.menu_player_index
@@ -534,6 +606,8 @@ class SobrevivenciaGame(InputManager, MenuController):
                                     state, inventory_selected = self._handle_inventory_action(action, state, game, inventory_selected)
                                     if state == "fusion_confirm":
                                         fusion_confirm_selected = 1
+                                    elif state == "stamp_fusion_confirm":
+                                        fusion_confirm_selected = 1
                                     break
                                 if state == "stat_shop":
                                     state = self._handle_stat_shop_action(action, game, stat_shop_return_state)
@@ -546,6 +620,10 @@ class SobrevivenciaGame(InputManager, MenuController):
                                     break
                                 if action == "commands":
                                     commands_return_state = "paused" if state == "paused" else "start"
+                                elif action == "encyclopedia":
+                                    encyclopedia_return_state = "paused" if state == "paused" else "start"
+                                    state = "encyclopedia"
+                                    break
                                 elif action == "settings":
                                     settings_return_state = "paused" if state == "paused" else "start"
                                     state = "settings"
@@ -643,6 +721,10 @@ class SobrevivenciaGame(InputManager, MenuController):
                             elif action == "commands":
                                 commands_return_state = "start"
                                 state = "commands"
+                            elif action == "encyclopedia":
+                                encyclopedia_return_state = "start"
+                                encyclopedia_selected = 0
+                                state = "encyclopedia"
                             elif action == "settings":
                                 settings_return_state = "start"
                                 state = "settings"
@@ -696,6 +778,24 @@ class SobrevivenciaGame(InputManager, MenuController):
                     elif state == "commands":
                         if self._menu_confirm_pressed() or self._menu_back_pressed():
                             state = commands_return_state
+                    elif state == "encyclopedia":
+                        entries = ui.filtered_encyclopedia_entries(encyclopedia_category, encyclopedia_query)
+                        categories = ("Todos",) + ENCYCLOPEDIA_CATEGORIES
+                        if self._menu_back_pressed():
+                            state = encyclopedia_return_state
+                        elif self._menu_up_pressed() and entries:
+                            encyclopedia_selected = (encyclopedia_selected - 1) % len(entries)
+                        elif self._menu_down_pressed() and entries:
+                            encyclopedia_selected = (encyclopedia_selected + 1) % len(entries)
+                        elif self._menu_left_pressed() or self._menu_l1_pressed():
+                            encyclopedia_category = categories[(categories.index(encyclopedia_category) - 1) % len(categories)] if encyclopedia_category in categories else "Todos"
+                            encyclopedia_selected = 0
+                        elif self._menu_right_pressed() or self._menu_r1_pressed():
+                            encyclopedia_category = categories[(categories.index(encyclopedia_category) + 1) % len(categories)] if encyclopedia_category in categories else "Todos"
+                            encyclopedia_selected = 0
+                        elif self._menu_y_pressed():
+                            encyclopedia_query = ""
+                            encyclopedia_selected = 0
                     elif state == "settings":
                         if self._menu_back_pressed():
                             state = settings_return_state
@@ -722,6 +822,11 @@ class SobrevivenciaGame(InputManager, MenuController):
                             action = PAUSE_OPTIONS[pause_selected][1]
                             if action == "commands":
                                 commands_return_state = "paused"
+                            if action == "encyclopedia":
+                                encyclopedia_return_state = "paused"
+                                encyclopedia_selected = 0
+                                state = "encyclopedia"
+                                continue
                             if action == "settings":
                                 settings_return_state = "paused"
                                 state = "settings"
@@ -834,11 +939,13 @@ class SobrevivenciaGame(InputManager, MenuController):
                         items = active_items + reserve_items
                         
                         if self._menu_back_pressed() or self._action_pressed(event, controls, "inventory"):
+                            if game.active_altar is not None:
+                                game.finish_altar_interaction(destroy=True)
                             state = "playing"
                         elif self._menu_r1_pressed() or self._menu_l1_pressed() or (event.type == pygame.KEYDOWN and event.key == pygame.K_t):
-                            if inv.black_market_unlocked:
-                                inventory_tab = "shop" if inventory_tab == "items" else "items"
-                                inventory_selected = 0
+                            tabs = ["items", "stamps"] + (["shop"] if inv.black_market_unlocked else [])
+                            inventory_tab = tabs[(tabs.index(inventory_tab) + 1) % len(tabs)] if inventory_tab in tabs else "items"
+                            inventory_selected = 0
                         elif game.multiplayer and self._menu_l3_pressed():
                             game.menu_player_index = 1 - game.menu_player_index
                             inventory_selected = 0
@@ -934,8 +1041,14 @@ class SobrevivenciaGame(InputManager, MenuController):
                             action = "fusion_confirm_yes" if fusion_confirm_selected == 0 else "fusion_confirm_no"
                             state, inventory_selected = self._handle_fusion_confirm_action(action, game, inventory_selected)
 
+                    elif state == "rng_result":
+                        if self._menu_confirm_pressed() or self._menu_back_pressed():
+                            state = "playing"
+
                     elif state == "stat_shop":
                         if self._menu_back_pressed() or self._action_pressed(event, controls, "stat_shop"):
+                            if game.active_altar is not None:
+                                game.finish_altar_interaction(destroy=True)
                             state = stat_shop_return_state
                         elif not game.stat_shop_offers:
                             if (self._menu_confirm_pressed() or self._menu_y_pressed()) and game.stat_shop_unlocked():
@@ -988,6 +1101,8 @@ class SobrevivenciaGame(InputManager, MenuController):
                     elif state == "skills":
                         keys = list(game.get_player(game.menu_player_index).passives.keys())
                         if self._menu_back_pressed() or self._action_pressed(event, controls, "skills"):
+                            if game.active_altar is not None:
+                                game.finish_altar_interaction(destroy=True)
                             state = skills_return_state
                         elif game.multiplayer and self._menu_y_pressed():
                             game.menu_player_index = 1 - game.menu_player_index
@@ -1103,6 +1218,10 @@ class SobrevivenciaGame(InputManager, MenuController):
                             elif action == "commands":
                                 commands_return_state = "start"
                                 state = "commands"
+                            elif action == "encyclopedia":
+                                encyclopedia_return_state = "start"
+                                encyclopedia_selected = 0
+                                state = "encyclopedia"
                             elif action == "settings":
                                 settings_return_state = "start"
                                 state = "settings"
@@ -1217,6 +1336,11 @@ class SobrevivenciaGame(InputManager, MenuController):
                             action = PAUSE_OPTIONS[pause_selected][1]
                             if action == "commands":
                                 commands_return_state = "paused"
+                            if action == "encyclopedia":
+                                encyclopedia_return_state = "paused"
+                                encyclopedia_selected = 0
+                                state = "encyclopedia"
+                                continue
                             if action == "settings":
                                 settings_return_state = "paused"
                                 state = "settings"
@@ -1254,8 +1378,38 @@ class SobrevivenciaGame(InputManager, MenuController):
                         if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                             state = commands_return_state
 
+                    elif state == "encyclopedia":
+                        entries = ui.filtered_encyclopedia_entries(encyclopedia_category, encyclopedia_query)
+                        categories = ("Todos",) + ENCYCLOPEDIA_CATEGORIES
+                        if event.key == pygame.K_ESCAPE:
+                            state = encyclopedia_return_state
+                        elif event.key == pygame.K_BACKSPACE:
+                            if encyclopedia_query:
+                                encyclopedia_query = encyclopedia_query[:-1]
+                                encyclopedia_selected = 0
+                            else:
+                                state = encyclopedia_return_state
+                        elif event.key == pygame.K_UP and entries:
+                            encyclopedia_selected = (encyclopedia_selected - 1) % len(entries)
+                        elif event.key == pygame.K_DOWN and entries:
+                            encyclopedia_selected = (encyclopedia_selected + 1) % len(entries)
+                        elif event.key in (pygame.K_LEFT, pygame.K_q):
+                            encyclopedia_category = categories[(categories.index(encyclopedia_category) - 1) % len(categories)] if encyclopedia_category in categories else "Todos"
+                            encyclopedia_selected = 0
+                        elif event.key in (pygame.K_RIGHT, pygame.K_e):
+                            encyclopedia_category = categories[(categories.index(encyclopedia_category) + 1) % len(categories)] if encyclopedia_category in categories else "Todos"
+                            encyclopedia_selected = 0
+                        elif event.key == pygame.K_DELETE:
+                            encyclopedia_query = ""
+                            encyclopedia_selected = 0
+                        elif getattr(event, "unicode", "") and event.unicode.isprintable():
+                            encyclopedia_query += event.unicode
+                            encyclopedia_selected = 0
+
                     elif state == "stat_shop":
                         if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE) or self._action_pressed(event, controls, "stat_shop"):
+                            if game.active_altar is not None:
+                                game.finish_altar_interaction(destroy=True)
                             state = stat_shop_return_state
                         elif event.key == pygame.K_r and game.stat_shop_unlocked() and not game.stat_shop_offers:
                             if game.inventory.points >= STAT_SHOP_ROLL_COST:
@@ -1337,6 +1491,8 @@ class SobrevivenciaGame(InputManager, MenuController):
                     elif state == "skills":
                         keys = list(game.get_player(game.menu_player_index).passives.keys())
                         if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE, pygame.K_k):
+                            if game.active_altar is not None:
+                                game.finish_altar_interaction(destroy=True)
                             state = skills_return_state
                         elif game.multiplayer and event.key == pygame.K_p:
                             game.menu_player_index = 1 - game.menu_player_index
@@ -1384,10 +1540,13 @@ class SobrevivenciaGame(InputManager, MenuController):
                         items = active_items + reserve_items
 
                         if event.key in (pygame.K_ESCAPE, pygame.K_i):
+                            if game.active_altar is not None:
+                                game.finish_altar_interaction(destroy=True)
                             state = "playing"
                             inventory_tab = "items"
-                        elif event.key in (pygame.K_TAB, pygame.K_q) and inv.black_market_unlocked:
-                            inventory_tab = "shop" if inventory_tab == "items" else "items"
+                        elif event.key in (pygame.K_TAB, pygame.K_q):
+                            tabs = ["items", "stamps"] + (["shop"] if inv.black_market_unlocked else [])
+                            inventory_tab = tabs[(tabs.index(inventory_tab) + 1) % len(tabs)] if inventory_tab in tabs else "items"
                             inventory_selected = 0
                         elif game.multiplayer and event.key == pygame.K_p:
                             game.menu_player_index = 1 - game.menu_player_index
@@ -1413,6 +1572,71 @@ class SobrevivenciaGame(InputManager, MenuController):
                                     state = "point_confirm"
                                 else:
                                     game.message = f"Pontos insuficientes (custa {cost})."
+                        elif inventory_tab == "stamps":
+                            player = game.get_player(game.menu_player_index)
+                            stamp_count = len(player.weapon_stamps.get("weapon_1", [])) + len(player.weapon_stamps.get("weapon_2", [])) + len(player.stamp_reserve)
+                            if stamp_count:
+                                if event.key == pygame.K_UP:
+                                    inventory_selected -= 5
+                                elif event.key == pygame.K_DOWN:
+                                    inventory_selected += 5
+                                elif event.key == pygame.K_LEFT:
+                                    inventory_selected -= 1
+                                elif event.key == pygame.K_RIGHT:
+                                    inventory_selected += 1
+                                elif event.key == pygame.K_1:
+                                    game.equip_stamp("weapon_1", inventory_selected)
+                                elif event.key == pygame.K_2:
+                                    game.equip_stamp("weapon_2", inventory_selected)
+                                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_e):
+                                    game.unequip_stamp(inventory_selected)
+                                elif event.key == pygame.K_f:
+                                    game.setup_stamp_fusion(inventory_selected)
+                                    state = "stamp_fusion_confirm"
+                                    fusion_confirm_selected = 1
+                                elif event.key == pygame.K_s:
+                                    player = game.get_player(game.menu_player_index)
+                                    entries = game._stamp_entries(player)
+                                    if inventory_selected < len(entries) and entries[inventory_selected][0] == "reserve":
+                                        stamp = entries[inventory_selected][2]
+                                        try:
+                                            from Sobrevivencia.data.stamps import stamp_sell_value
+                                        except:
+                                            from data.stamps import stamp_sell_value
+                                        value = stamp_sell_value(stamp)
+                                        self.point_confirm_action = ("sell_stamp", inventory_selected)
+                                        self.point_confirm_cost = 0
+                                        self.point_confirm_msg = f"Deseja vender este selo por {value} ponto(s)?"
+                                        self.point_confirm_return = "inventory"
+                                        self.point_confirm_selected = 1
+                                        state = "point_confirm"
+                                    else:
+                                        game.message = "Desequipe o selo antes de vende-lo."
+                                inventory_selected = max(0, min(inventory_selected, stamp_count - 1))
+                        elif inventory_tab == "stamps":
+                            player = game.get_player(game.menu_player_index)
+                            stamp_count = len(player.weapon_stamps.get("weapon_1", [])) + len(player.weapon_stamps.get("weapon_2", [])) + len(player.stamp_reserve)
+                            if stamp_count:
+                                if self._menu_up_pressed():
+                                    inventory_selected -= 5
+                                elif self._menu_down_pressed():
+                                    inventory_selected += 5
+                                elif self._menu_left_pressed():
+                                    inventory_selected -= 1
+                                elif self._menu_right_pressed():
+                                    inventory_selected += 1
+                                elif self._menu_confirm_pressed():
+                                    game.unequip_stamp(inventory_selected)
+                                elif self._menu_x_pressed():
+                                    game.equip_stamp("weapon_1", inventory_selected)
+                                elif self._menu_y_pressed():
+                                    game.equip_stamp("weapon_2", inventory_selected)
+                                elif event.type == pygame.KEYDOWN and event.key == pygame.K_f:
+                                    game.setup_stamp_fusion(inventory_selected)
+                                    state = "stamp_fusion_confirm"
+                                    fusion_confirm_selected = 1
+                                inventory_selected = max(0, min(inventory_selected, stamp_count - 1))
+
                         elif items:
                             if event.key == pygame.K_UP:
                                 inventory_selected -= 5
@@ -1478,6 +1702,26 @@ class SobrevivenciaGame(InputManager, MenuController):
                             action = "fusion_confirm_yes" if fusion_confirm_selected == 0 else "fusion_confirm_no"
                             state, inventory_selected = self._handle_fusion_confirm_action(action, game, inventory_selected)
 
+                    elif state == "stamp_fusion_confirm":
+                        if self._menu_back_pressed():
+                            state, inventory_selected = self._handle_stamp_fusion_confirm_action("stamp_fusion_confirm_no", game, inventory_selected)
+                        elif self._menu_left_pressed() or self._menu_right_pressed() or self._menu_up_pressed() or self._menu_down_pressed():
+                            fusion_confirm_selected = 1 - fusion_confirm_selected
+                        elif self._menu_confirm_pressed():
+                            action = "stamp_fusion_confirm_yes" if fusion_confirm_selected == 0 else "stamp_fusion_confirm_no"
+                            state, inventory_selected = self._handle_stamp_fusion_confirm_action(action, game, inventory_selected)
+
+                    elif state == "stamp_fusion_confirm":
+                        if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE, pygame.K_n):
+                            state, inventory_selected = self._handle_stamp_fusion_confirm_action("stamp_fusion_confirm_no", game, inventory_selected)
+                        elif event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN):
+                            fusion_confirm_selected = 1 - fusion_confirm_selected
+                        elif event.key in (pygame.K_y,):
+                            state, inventory_selected = self._handle_stamp_fusion_confirm_action("stamp_fusion_confirm_yes", game, inventory_selected)
+                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                            action = "stamp_fusion_confirm_yes" if fusion_confirm_selected == 0 else "stamp_fusion_confirm_no"
+                            state, inventory_selected = self._handle_stamp_fusion_confirm_action(action, game, inventory_selected)
+
                     elif state == "point_confirm":
                         self._refresh_point_confirm_quantity(game)
                         if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE, pygame.K_n):
@@ -1497,6 +1741,10 @@ class SobrevivenciaGame(InputManager, MenuController):
                             else:
                                 self._clear_point_confirm_quantity()
                                 state = self.point_confirm_return
+
+                    elif state == "rng_result":
+                        if event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE, pygame.K_e, pygame.K_y):
+                            state = "playing"
 
                     elif state == "game_over":
                         if event.key == pygame.K_r:
@@ -1532,6 +1780,28 @@ class SobrevivenciaGame(InputManager, MenuController):
                 move = self._movement_vector(p1_controls)
                 move_2 = self._joystick_movement_vector() if game.multiplayer else None
                 game.update(dt, move, aim_world, move_2, p2_aim_world)
+                if getattr(game, "active_altar", None) is not None and getattr(game, "menu_just_opened_by_altar", None) is not None:
+                    kind = game.menu_just_opened_by_altar
+                    game.menu_just_opened_by_altar = None
+                    menu_player = getattr(game, "menu_player_index", 0)
+                    for p in (0, 1):
+                        special_holding[p] = False
+                        special_hold_triggered[p] = False
+                        special_combo_checked[p] = False
+                        combo_holding[p] = False
+                        combo_hold_triggered[p] = False
+                    if kind == "weapon_altar":
+                        state = "inventory"
+                        inventory_tab = "items"
+                        inventory_selected = min(inventory_selected, max(0, len(game.get_inventory(menu_player).item_list()) - 1))
+                    elif kind == "skill_altar":
+                        skills_return_state = "playing"
+                        state = "skills"
+                        skill_selected = min(skill_selected, max(0, len(game.get_player(menu_player).passives) - 1))
+                    elif kind == "stat_altar":
+                        stat_shop_return_state = "playing"
+                        state = "stat_shop"
+                        stat_shop_selected = 0
                 if game.level_up_pending:
                     state = "upgrade"
                     upgrade_selected = 0
@@ -1571,6 +1841,10 @@ class SobrevivenciaGame(InputManager, MenuController):
                     self._joystick_count(),
                     mouse_pos,
                 )
+            elif state == "encyclopedia":
+                entries = ui.filtered_encyclopedia_entries(encyclopedia_category, encyclopedia_query)
+                encyclopedia_selected = min(encyclopedia_selected, max(0, len(entries) - 1))
+                button_rects = ui.render_encyclopedia(encyclopedia_selected, mouse_pos, encyclopedia_category, encyclopedia_query)
             elif state == "stat_shop":
                 button_rects = ui.render_stat_shop(game, stat_shop_selected, mouse_pos)
             elif state == "constructions":
@@ -1585,12 +1859,21 @@ class SobrevivenciaGame(InputManager, MenuController):
                 inv = game.get_inventory(game.menu_player_index)
                 if inventory_tab == "shop":
                     inventory_selected = min(inventory_selected, max(0, len(list(BASE_ITEM_KEYS)) - 1))
+                elif inventory_tab == "stamps":
+                    player = game.get_player(game.menu_player_index)
+                    stamp_count = len(player.weapon_stamps.get("weapon_1", [])) + len(player.weapon_stamps.get("weapon_2", [])) + len(player.stamp_reserve)
+                    inventory_selected = min(inventory_selected, max(0, stamp_count - 1))
                 else:
                     inventory_selected = min(inventory_selected, max(0, len(inv.item_list()) - 1))
                 button_rects = ui.render_inventory_gui(game, inventory_selected, mouse_pos, inventory_tab)
             elif state == "fusion_confirm":
                 inventory_selected = min(inventory_selected, max(0, len(game.get_inventory(game.menu_player_index).item_list()) - 1))
                 button_rects = ui.render_fusion_confirm(game, inventory_selected, fusion_confirm_selected, mouse_pos)
+            elif state == "stamp_fusion_confirm":
+                player = game.get_player(game.menu_player_index)
+                stamp_count = len(player.weapon_stamps.get("weapon_1", [])) + len(player.weapon_stamps.get("weapon_2", [])) + len(player.stamp_reserve)
+                inventory_selected = min(inventory_selected, max(0, stamp_count - 1))
+                button_rects = ui.render_stamp_fusion_confirm(game, inventory_selected, fusion_confirm_selected, mouse_pos)
             elif state == "point_confirm":
                 if self.point_confirm_return == "stat_shop":
                     ui.render_stat_shop(game, stat_shop_selected, mouse_pos)
@@ -1609,6 +1892,14 @@ class SobrevivenciaGame(InputManager, MenuController):
                     self.point_confirm_max_quantity,
                     self.point_confirm_total_cost,
                 )
+            elif state == "rng_result":
+                if self.point_confirm_return == "stat_shop":
+                    ui.render_stat_shop(game, stat_shop_selected, mouse_pos)
+                elif self.point_confirm_return == "skills":
+                    ui.render_skills(game, skill_selected, mouse_pos)
+                elif self.point_confirm_return == "inventory":
+                    ui.render_inventory_gui(game, inventory_selected, mouse_pos, inventory_tab)
+                button_rects = ui.render_rng_result(game, mouse_pos)
             elif state == "game_over":
                 button_rects = ui.render_game_over(game, mouse_pos, game_over_selected)
 

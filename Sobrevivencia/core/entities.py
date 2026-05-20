@@ -132,6 +132,12 @@ class Player:
     player_index: int = 0
     is_down: bool = False
     revive_progress: float = 0.0
+
+    # Sistema de Selos (Stamps) — Modificadores Globais de Armas
+    # weapon_stamps: dict { "weapon_1": [Stamp, ...], "weapon_2": [Stamp, ...] } — max 3 por arma
+    # stamp_reserve: list[Stamp] — selos coletados mas não equipados
+    weapon_stamps: dict = field(default_factory=lambda: {"weapon_1": [], "weapon_2": []})
+    stamp_reserve: list = field(default_factory=list)
     
     # Physics
     body: Any = field(default=None, init=False)
@@ -214,6 +220,7 @@ class Enemy:
     body: Any = field(default=None, init=False)
     shape: Any = field(default=None, init=False)
     enraged: bool = False
+    intangible: bool = False
     action: str = ""
     action_timer: float = 0
     target_pos: Vector2 = field(default_factory=lambda: Vector2(0, 0))
@@ -234,6 +241,7 @@ class Projectile:
     pierce: int = 0
     explosive_level: int = 0
     homing_level: int = 0
+    stun_level: int = 0
     owner: int = 0
 
 
@@ -252,6 +260,8 @@ class Slash:
     shockwave_level: int = 0
     bleed_level: int = 0
     shadow_lunge_level: int = 0
+    heavy_alloy_level: int = 0
+    magnetic_pull_level: int = 0
     owner: int = 0
 
 
@@ -283,3 +293,38 @@ class Hazard:
     kind: str
     chunk: tuple
     pulse: float = 0
+
+
+@dataclass
+class EscortNPC:
+    pos: Vector2
+    hp: float
+    max_hp: float
+    speed: float
+    kind: str
+    radius: float = 12.0
+    hit_flash: float = 0.0
+
+@dataclass
+class PlayerConstruct:
+    pos: Vector2
+    kind: str
+    hp: float
+    max_hp: float
+    radius: float
+    duration: float
+    age: float = 0
+    attack_timer: float = 0
+    owner: int = 0
+    hit_flash: float = 0
+    level: int = 0
+    angle: float = 0.0
+
+@dataclass
+class Altar:
+    pos: Vector2
+    kind: str  # "weapon_altar", "skill_altar", "stat_altar"
+    radius: float = 24.0
+    active: bool = True
+    age: float = 0.0
+    hit_flash: float = 0.0

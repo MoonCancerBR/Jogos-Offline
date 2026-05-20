@@ -19,10 +19,11 @@ class SystemMenus:
         self._center_text("Top-down shooter/slasher infinito", self.font, 190, COLORS["muted"])
         self._center_text("WASD/analogico move  |  Mouse mira  |  A confirma/dash  |  B volta  |  Start pausa", self.font_small, 232, COLORS["muted"])
         buttons = []
-        buttons.append(self._button(410, 300, 280, 48, "Iniciar Jogo", "character_select", mouse_pos, COLORS["xp"], selected == 0))
-        buttons.append(self._button(410, 362, 280, 48, "Comandos", "commands", mouse_pos, COLORS["special"], selected == 1))
-        buttons.append(self._button(410, 424, 280, 48, "Configuracoes", "settings", mouse_pos, COLORS["upgrade"], selected == 2))
-        buttons.append(self._button(410, 486, 280, 48, "Voltar ao Menu", "menu", mouse_pos, COLORS["muted_2"], selected == 3))
+        buttons.append(self._button(410, 286, 280, 46, "Iniciar Jogo", "character_select", mouse_pos, COLORS["xp"], selected == 0))
+        buttons.append(self._button(410, 344, 280, 46, "Enciclopedia", "encyclopedia", mouse_pos, COLORS["special"], selected == 1))
+        buttons.append(self._button(410, 402, 280, 46, "Comandos", "commands", mouse_pos, COLORS["special"], selected == 2))
+        buttons.append(self._button(410, 460, 280, 46, "Configuracoes", "settings", mouse_pos, COLORS["upgrade"], selected == 3))
+        buttons.append(self._button(410, 518, 280, 46, "Voltar ao Menu", "menu", mouse_pos, COLORS["muted_2"], selected == 4))
         # pygame.display.flip()
         return buttons
 

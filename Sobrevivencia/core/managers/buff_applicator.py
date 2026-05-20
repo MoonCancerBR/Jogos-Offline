@@ -125,6 +125,7 @@ def recalc_item_buffs(player: "Player", inventory: "Inventory") -> None:
     player.item_attack_rate_bonus = 0.0
     player.item_sword_range_bonus = 0.0
     player.item_guardian_reduction = 0.0   # guardada separada; usada em _damage_player_direct
+    player.item_magnet_bonus      = 0.0
 
     active = inventory.active_items()
 
@@ -163,6 +164,20 @@ def recalc_item_buffs(player: "Player", inventory: "Inventory") -> None:
             player.item_attack_rate_bonus += 0.012 * item.level * scale
             player.item_speed_bonus       += 0.010 * item.level * scale
 
+    # --- Bônus de Sinergias de Tags (2+ ativos com mesma tag) ---
+    active_syns = inventory.get_active_synergies()
+    for syn in active_syns:
+        if syn == "elemental":
+            player.item_damage_bonus += 0.10
+        elif syn == "defensiva":
+            player.item_guardian_reduction += 0.08
+        elif syn == "utilitaria":
+            player.item_magnet_bonus += 40.0
+        elif syn == "cinetica":
+            player.item_speed_bonus += 0.12
+        elif syn == "ofensiva":
+            player.item_attack_rate_bonus += 0.15
+
 
 def ensure_item_bonus_fields(player: "Player") -> None:
     """
@@ -179,3 +194,6 @@ def ensure_item_bonus_fields(player: "Player") -> None:
         player.item_sword_range_bonus = 0.0
     if not hasattr(player, "item_guardian_reduction"):
         player.item_guardian_reduction = 0.0
+    if not hasattr(player, "item_magnet_bonus"):
+        player.item_magnet_bonus      = 0.0
+

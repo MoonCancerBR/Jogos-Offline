@@ -10,7 +10,8 @@ else:
 
 class EnemyManager:
     def _spawn_enemies(self, dt):
-        difficulty = 1.0 + self.time_alive / 85.0 + (self.player.level - 1) * 0.09
+        heat_multiplier = 1.0 + getattr(self, "heat_level", 0.0) / 100.0 * 0.75
+        difficulty = (1.0 + self.time_alive / 85.0 + (self.player.level - 1) * 0.09) * heat_multiplier
         self._update_special_spawns(dt, difficulty)
 
         if len(self.enemies) >= MAX_ENEMIES:
@@ -31,13 +32,14 @@ class EnemyManager:
             self._spawn_one_enemy(difficulty)
 
     def _update_special_spawns(self, dt, difficulty):
-        self.chromatic_spawn_timer -= dt
+        heat_factor = 1.0 + getattr(self, "heat_level", 0.0) / 100.0 * 1.5
+        self.chromatic_spawn_timer -= dt * heat_factor
         if self.chromatic_spawn_timer <= 0:
             if len(self.enemies) < MAX_ENEMIES:
                 self._spawn_special_enemy("chromatic", difficulty)
             self.chromatic_spawn_timer = self.random.uniform(CHROMATIC_SPAWN_MIN, CHROMATIC_SPAWN_MAX)
 
-        self.miniboss_spawn_timer -= dt
+        self.miniboss_spawn_timer -= dt * (1.0 + getattr(self, "heat_level", 0.0) / 100.0 * 0.5)
         has_miniboss = any(enemy.kind == "miniboss" for enemy in self.enemies)
         if self.miniboss_spawn_timer <= 0:
             if self.time_alive > 45 and not has_miniboss and len(self.enemies) < MAX_ENEMIES:
@@ -84,25 +86,50 @@ class EnemyManager:
         if not self.world.circle_hits_wall(enemy.pos, enemy.radius):
             self.enemies.append(enemy)
             self.message = message
+            if kind == "miniboss":
+                self.miniboss_arena_center = Vector2(enemy.pos)
+                self.miniboss_arena_radius = 520.0
+                trapped = min(self.alive_players(), key=lambda p: p.pos.distance_to(enemy.pos), default=self.player)
+                self.miniboss_trapped_player = trapped
 
     def _spawn_one_enemy(self, difficulty):
         angle = self.random.random() * math.tau
         distance = self.random.uniform(SPAWN_DISTANCE_MIN, SPAWN_DISTANCE_MAX)
         pos = self.player.pos + Vector2(math.cos(angle), math.sin(angle)) * distance
 
+        is_night = getattr(self, "light_level", 1.0) < 0.15
         roll = self.random.random()
-        if self.time_alive > 190 and roll < 0.10:
-            kind = "sapper"
-        elif self.time_alive > 150 and roll < 0.22:
-            kind = "bulwark"
-        elif self.time_alive > 95 and roll < 0.29: # Reduzido de 0.34 (12% -> 7%)
-            kind = "spitter"
-        elif self.time_alive > 75 and roll < 0.48:
-            kind = "brute"
-        elif self.time_alive > 25 and roll < 0.72:
-            kind = "runner"
+        
+        if is_night:
+            if roll < 0.22:
+                kind = "morcego_sombra"
+            elif roll < 0.44:
+                kind = "lobo_infectado"
+            elif roll < 0.62:
+                kind = "phantom"
+            elif roll < 0.80:
+                kind = "runner"
+            else:
+                kind = "basic"
         else:
-            kind = "basic"
+            if roll < 0.08:
+                kind = "phantom"
+            elif roll < 0.16:
+                kind = "golem"
+            elif roll < 0.24:
+                kind = "necromancer"
+            elif self.time_alive > 190 and roll < 0.32:
+                kind = "sapper"
+            elif self.time_alive > 150 and roll < 0.42:
+                kind = "bulwark"
+            elif self.time_alive > 95 and roll < 0.50:
+                kind = "spitter"
+            elif self.time_alive > 75 and roll < 0.65:
+                kind = "brute"
+            elif self.time_alive > 25 and roll < 0.82:
+                kind = "runner"
+            else:
+                kind = "basic"
 
         data = ENEMY_TYPES[kind]
         enemy = Enemy(
@@ -126,13 +153,26 @@ class EnemyManager:
             self.enemies.append(enemy)
 
     def _nearest_alive_player(self, pos):
-        best = self.player
+        best_target = None
+        best_dist = 999999999
+        
+        if getattr(self, 'escort_event_active', False) and getattr(self, 'escort_state', '') == 'escorting':
+            for npc in getattr(self, 'escort_npcs', []):
+                if npc.hp <= 0: continue
+                d2 = pos.distance_squared_to(npc.pos)
+                if d2 < best_dist:
+                    best_target = npc
+                    best_dist = d2
+            if best_target and best_dist < 2250000:
+                return best_target
+                
+        best_target = self.player
         best_dist = pos.distance_squared_to(self.player.pos) if not self.player.is_down else 999999999
         if self.multiplayer and self.player2 is not None and not self.player2.is_down:
             d2 = pos.distance_squared_to(self.player2.pos)
             if d2 < best_dist:
-                best = self.player2
-        return best
+                best_target = self.player2
+        return best_target
 
     def _update_enemies(self, dt):
         alive_list = []
@@ -159,6 +199,59 @@ class EnemyManager:
                     self._cleanup_physics_entity(enemy)
                     continue
 
+            if enemy.kind == "phantom":
+                enemy.special_timer -= dt
+                if enemy.special_timer <= 0:
+                    enemy.intangible = not getattr(enemy, "intangible", False)
+                    enemy.special_timer = 4.0 if enemy.intangible else 6.0
+                    enemy.color = "#F3E8FF" if enemy.intangible else "#D8B4FE"
+                    if enemy.intangible:
+                        self.emit_particles(enemy.pos, count=16, color="#D8B4FE", speed=80)
+                        self.add_alert(enemy.pos, "INTANGIVEL", "#D8B4FE")
+                    else:
+                        self.emit_particles(enemy.pos, count=12, color="#9333EA", speed=100)
+                        self.add_alert(enemy.pos, "VULNERAVEL!", "#9333EA")
+                    if enemy.intangible:
+                        self.emit_particles(enemy.pos, count=16, color="#D8B4FE", speed=80)
+                        self.add_alert(enemy.pos, "INTANGIVEL", "#D8B4FE")
+                    else:
+                        self.emit_particles(enemy.pos, count=12, color="#9333EA", speed=100)
+                        self.add_alert(enemy.pos, "VULNERAVEL!", "#9333EA")
+                    if enemy.intangible:
+                        self.emit_particles(enemy.pos, count=16, color="#D8B4FE", speed=80)
+                        self.add_alert(enemy.pos, "INTANGIVEL", "#D8B4FE")
+                    else:
+                        self.emit_particles(enemy.pos, count=12, color="#9333EA", speed=100)
+                        self.add_alert(enemy.pos, "VULNERAVEL!", "#9333EA")
+            elif enemy.kind == "golem":
+                enemy.knockback = Vector2(0, 0)
+            elif enemy.kind == "necromancer":
+                enemy.summon_cooldown -= dt
+                if enemy.summon_cooldown <= 0 and len(self.enemies) < MAX_ENEMIES:
+                    enemy.summon_cooldown = 12.0
+                    for _ in range(2):
+                        if len(self.enemies) < MAX_ENEMIES:
+                            minion_data = ENEMY_TYPES["minion"]
+                            minion = Enemy(
+                                id=self.enemy_id,
+                                pos=enemy.pos + self.random_offset(25),
+                                kind="minion",
+                                radius=minion_data["radius"],
+                                speed=minion_data["speed"] * self.director_speed,
+                                max_health=minion_data["health"] * self.director_health,
+                                health=minion_data["health"] * self.director_health,
+                                damage=minion_data["damage"] * self.director_damage,
+                                xp_value=minion_data["xp"],
+                                color=minion_data["color"],
+                                special_value=minion_data["special"],
+                                coin_chance=minion_data["coin_chance"],
+                            )
+                            self.enemy_id += 1
+                            self._setup_physics_entity(minion)
+                            self.enemies.append(minion)
+                    self.emit_particles(enemy.pos, count=28, color="#C084FC", speed=120)
+                    self.add_alert(enemy.pos, "INVOCANDO!", "#C084FC")
+
             target = self._nearest_alive_player(enemy.pos)
             to_player = target.pos - enemy.pos
             if to_player.length_squared() > 0:
@@ -166,8 +259,60 @@ class EnemyManager:
             else:
                 direction = Vector2(1, 0)
 
+            # Crowd and Miniboss Arena physics:
+            center = getattr(self, "miniboss_arena_center", None)
+            if center is not None and enemy.kind != "miniboss":
+                radius = getattr(self, "miniboss_arena_radius", 520.0)
+                dist = enemy.pos.distance_to(center)
+                to_center = (center - enemy.pos)
+                dist_to_center = to_center.length()
+                if dist_to_center > 0:
+                    dir_to_center = to_center.normalize()
+                else:
+                    dir_to_center = Vector2(1, 0)
+                
+                # Check how many enemies are inside
+                inside_count = sum(1 for e in self.enemies if e.kind != "miniboss" and e.pos.distance_to(center) < radius)
+                
+                # If enemy is inside
+                if dist < radius:
+                    if inside_count > 5:
+                        # Exceeded limits: push outside!
+                        enemy.pos = center - dir_to_center * radius
+                        dist = radius
+                
+                # If enemy is outside or was pushed outside
+                if dist >= radius:
+                    # Keep outside the arena!
+                    if dist < radius + 10:
+                        enemy.pos = center - dir_to_center * (radius + 12)
+                        dist = radius + 12
+                    
+                    # Crowd / Gladiator Audience behavior:
+                    # Orbit between radius+30 (550px) and radius+160 (680px)
+                    min_orb = radius + 30
+                    max_orb = radius + 160
+                    if dist > max_orb:
+                        # Move towards the arena
+                        direction = dir_to_center
+                    elif dist < min_orb:
+                        # Move away from the arena
+                        direction = -dir_to_center
+                    else:
+                        # Orbit! Perpendicular direction
+                        orbit_dir = Vector2(-dir_to_center.y, dir_to_center.x)
+                        # Alternate orbit direction based on enemy ID to look natural!
+                        if enemy.id % 2 == 0:
+                            orbit_dir = -orbit_dir
+                        # Slight pull towards middle orbit
+                        mid_orb = (min_orb + max_orb) / 2.0
+                        pull = (mid_orb - dist) / 100.0
+                        direction = (orbit_dir + dir_to_center * pull).normalize()
+
             slow = 0.28 if enemy.frozen_timer > 0 else 1.0
             chase_speed = enemy.speed * slow * self.world.hazard_speed_multiplier_at(enemy.pos.x, enemy.pos.y)
+            if getattr(self, "light_level", 1.0) < 0.1:
+                chase_speed *= 1.05
             if enemy.kind == "chromatic":
                 velocity = self._chromatic_velocity(enemy, chase_speed)
             elif enemy.kind == "miniboss":
@@ -185,8 +330,26 @@ class EnemyManager:
             else:
                 enemy.pos = self._move_enemy(enemy, direction, chase_speed, velocity, dt)
 
-            # Contact damage: check all alive players
+            # Contact damage: check all alive players and NPCs
             sapper_detonated = False
+            
+            if getattr(self, 'escort_event_active', False) and getattr(self, 'escort_state', '') == 'escorting':
+                for npc in getattr(self, 'escort_npcs', []):
+                    if npc.hp <= 0: continue
+                    distance_sq = enemy.pos.distance_squared_to(npc.pos)
+                    contact_radius = enemy.radius + npc.radius
+                    if distance_sq <= contact_radius * contact_radius:
+                        npc.hp -= enemy.damage * dt
+                        npc.hit_flash = 0.1
+                        if enemy.kind == 'sapper' and distance_sq <= (enemy.radius + npc.radius + 38) ** 2:
+                            self._detonate_sapper(enemy)
+                            sapper_detonated = True
+                            break
+                            
+            if sapper_detonated:
+                self._cleanup_physics_entity(enemy)
+                continue
+                
             for player in self.alive_players():
                 distance_sq = enemy.pos.distance_squared_to(player.pos)
                 if enemy.kind == "sapper" and distance_sq <= (enemy.radius + player.radius + 38) ** 2:
@@ -202,6 +365,8 @@ class EnemyManager:
                         self.damage_enemy(enemy, 22 * dt, source="shield")
                     elif player.invulnerable_timer <= 0:
                         self._damage_player_direct(player, enemy.damage * dt)
+                        if enemy.kind == "phantom":
+                            player.buffs["freeze"] = max(player.buffs.get("freeze", 0), 2.0)
             if sapper_detonated:
                 self._cleanup_physics_entity(enemy)
                 continue

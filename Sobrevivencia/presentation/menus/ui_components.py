@@ -2,11 +2,11 @@ import pygame
 
 try:
     import pygame_gui
-    from pygame_gui.elements import UIButton, UILabel, UIPanel, UIScrollingContainer, UITextBox, UIWindow, UIImage
+    from pygame_gui.elements import UIButton, UILabel, UIPanel, UIScrollingContainer, UITextBox, UITextEntryLine, UIWindow, UIImage
     from pygame_gui.core import ObjectID
 except ImportError:
     pygame_gui = None
-    UIButton = UILabel = UIPanel = UIScrollingContainer = UITextBox = UIWindow = None
+    UIButton = UILabel = UIPanel = UIScrollingContainer = UITextBox = UITextEntryLine = UIWindow = None
 
     class ObjectID:
         def __init__(self, class_id=None, object_id=None):
@@ -24,6 +24,7 @@ WINDOW_ATTRS = (
     "game_over_window",
     "inv_window",
     "fusion_confirm_window",
+    "stamp_fusion_window",
     "point_confirm_window",
     "stat_shop_window",
     "skills_window",
@@ -34,6 +35,8 @@ WINDOW_ATTRS = (
     "character_select_window",
     "commands_window",
     "settings_window",
+    "encyclopedia_window",
+    "rng_result_window",
 )
 
 
@@ -43,14 +46,24 @@ STATE_WINDOW_ALLOWLIST = {
     "character_select": {"character_select_window"},
     "commands": {"commands_window"},
     "settings": {"settings_window"},
+    "encyclopedia": {"encyclopedia_window"},
     "paused": {"pause_window"},
     "inventory": {"inv_window"},
     "fusion_confirm": {"inv_window", "fusion_confirm_window"},
+    "stamp_fusion_confirm": {"inv_window", "stamp_fusion_window"},
     "point_confirm": {
         "inv_window",
         "skills_window",
         "stat_shop_window",
+        "constructions_window",
         "point_confirm_window",
+        "stamp_fusion_window",
+    },
+    "rng_result": {
+        "inv_window",
+        "skills_window",
+        "stat_shop_window",
+        "rng_result_window",
     },
     "stat_shop": {"stat_shop_window"},
     "constructions": {"constructions_window"},
@@ -113,7 +126,7 @@ class UIComponentFactory:
     def available(self):
         return pygame_gui is not None and self.manager is not None
 
-    def window(self, title, size, object_id, y=None, player_index=None, close_button=True):
+    def window(self, title, size, object_id, y=None, player_index=None, close_button=True, always_on_top=False):
         if not self.available:
             return None
         resolved_object_id = object_id
@@ -129,7 +142,7 @@ class UIComponentFactory:
             object_id=resolved_object_id,
             resizable=False,
             draggable=False,
-            always_on_top=False,
+            always_on_top=always_on_top,
         )
         if not close_button and getattr(win, "close_window_button", None):
             win.close_window_button.kill()
@@ -166,6 +179,19 @@ class UIComponentFactory:
             container=container,
             object_id=object_id,
         )
+
+    def text_entry(self, rect, text="", container=None, object_id=None):
+        if not self.available:
+            return None
+        entry = UITextEntryLine(
+            relative_rect=rect,
+            manager=self.manager,
+            container=container,
+            object_id=object_id,
+        )
+        if text:
+            entry.set_text(text)
+        return entry
 
     def scroll(self, rect, container=None, object_id=None):
         if not self.available:

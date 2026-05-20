@@ -29,10 +29,17 @@ logger = optional_from("loguru", "logger") or _create_std_logger()
 
 def configure_file_logging(path="game.log", level="INFO"):
     if hasattr(logger, "add"):
-        logger.add(path, rotation="5 MB", level=level)
+        try:
+            logger.add(path, rotation="5 MB", level=level)
+        except OSError:
+            logger.warning("Nao foi possivel abrir o arquivo de log: {}", path)
         return
 
-    file_handler = logging.FileHandler(path, encoding="utf-8")
+    try:
+        file_handler = logging.FileHandler(path, encoding="utf-8")
+    except OSError:
+        logger.warning("Nao foi possivel abrir o arquivo de log: %s", path)
+        return
     file_handler.setLevel(getattr(logging, level, logging.INFO))
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
@@ -61,9 +68,15 @@ def ease_in_quad(progress):
     return progress * progress
 
 
+def ease_out_cubic(progress):
+    progress = max(0.0, min(1.0, progress))
+    return 1.0 - (1.0 - progress) ** 3
+
+
 class TweeningFallback:
     easeOutQuad = staticmethod(ease_out_quad)
     easeInQuad = staticmethod(ease_in_quad)
+    easeOutCubic = staticmethod(ease_out_cubic)
 
 
 class NullGUIManager:

@@ -41,6 +41,21 @@ ITEM_DEFINITIONS = {
 BASE_ITEM_KEYS = tuple(ITEM_DEFINITIONS.keys())
 
 
+def get_item_tags(item):
+    base_tags = {
+        "storm_core": "elemental",
+        "guardian_plate": "defensiva",
+        "magnet_orb": "utilitaria",
+        "chrono_boots": "cinetica",
+        "blade_relay": "ofensiva",
+    }
+    if item.rank == 1:
+        return [base_tags.get(item.key, "normal")]
+    elif item.hybrid_sources:
+        return [base_tags.get(src, "normal") for src in item.hybrid_sources]
+    return ["normal"]
+
+
 @dataclass
 class InventoryItem:
     key: str
@@ -404,6 +419,23 @@ class Inventory:
 
     def active_relic_level(self):
         return sum(item.level for item in self.active_items() if item.is_relic)
+
+    def get_active_synergies(self):
+        tag_counts = {}
+        active_items = self.active_items()
+        for item in active_items:
+            if item.rank >= 2:
+                for tag in get_item_tags(item):
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        return {tag for tag, count in tag_counts.items() if count >= 2}
+
+    def is_item_synergized(self, item):
+        if item.rank < 2:
+            return False
+        active_syns = self.get_active_synergies()
+        item_tags = get_item_tags(item)
+        return any(t in active_syns for t in item_tags)
+
 
 
 def item_display_name(item):

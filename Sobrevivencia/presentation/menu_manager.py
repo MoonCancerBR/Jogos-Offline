@@ -39,7 +39,7 @@ class MenuManager:
         theme.widget_margin = (0, 15)
         return theme
 
-    def create_start_menu(self, on_start, on_commands, on_settings, on_quit):
+    def create_start_menu(self, on_start, on_commands, on_settings, on_quit, on_encyclopedia=None):
         if pygame_menu is None:
             menu = {
                 "title": "SOBREVIVENCIA",
@@ -47,6 +47,7 @@ class MenuManager:
                 "selected": 0,
                 "buttons": [
                     ("INICIAR JOGO", on_start),
+                    ("ENCICLOPEDIA", on_encyclopedia or on_commands),
                     ("COMANDOS", on_commands),
                     ("CONFIGURACOES", on_settings),
                     ("SAIR", on_quit),
@@ -63,13 +64,14 @@ class MenuManager:
         menu.add.label('Top-down Survival Evolved', font_size=20, font_color=hex_to_rgb(COLORS["muted"]))
         menu.add.vertical_margin(40)
         menu.add.button('INICIAR JOGO', on_start, background_color=hex_to_rgb(COLORS["xp"]), font_color=(10, 20, 30))
+        menu.add.button('ENCICLOPEDIA', on_encyclopedia or on_commands)
         menu.add.button('COMANDOS', on_commands)
         menu.add.button('CONFIGURACOES', on_settings)
         menu.add.button('SAIR', on_quit, font_color=hex_to_rgb(COLORS["danger"]))
         self.menus['start'] = menu
         return menu
 
-    def create_pause_menu(self, on_resume, on_inventory, on_skills, on_stat_shop, on_settings, on_quit):
+    def create_pause_menu(self, on_resume, on_inventory, on_skills, on_stat_shop, on_settings, on_quit, on_encyclopedia=None):
         if pygame_menu is None:
             menu = {
                 "title": "PAUSADO",
@@ -80,6 +82,7 @@ class MenuManager:
                     ("INVENTARIO", on_inventory),
                     ("SKILLS", on_skills),
                     ("LOJA DE STATUS", on_stat_shop),
+                    ("ENCICLOPEDIA", on_encyclopedia or on_resume),
                     ("CONFIGURACOES", on_settings),
                     ("SAIR PARA MENU", on_quit),
                 ],
@@ -96,6 +99,8 @@ class MenuManager:
         menu.add.button('INVENTARIO', on_inventory)
         menu.add.button('SKILLS', on_skills)
         menu.add.button('LOJA DE STATUS', on_stat_shop)
+        if on_encyclopedia:
+            menu.add.button('ENCICLOPEDIA', on_encyclopedia)
         menu.add.button('CONFIGURACOES', on_settings)
         menu.add.button('SAIR PARA MENU', on_quit, font_color=hex_to_rgb(COLORS["danger"]))
         self.menus['pause'] = menu

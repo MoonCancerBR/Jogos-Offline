@@ -6,13 +6,15 @@ from pygame.math import Vector2
 if __package__:
     from ..config.runtime import optional_import
     from ..data.constants import *
-    from .entities import Drop, Enemy, Player, Projectile, Slash
+    from ..data.stamps import stamp_total_bonus
+    from .entities import Drop, Enemy, Player, Projectile, Slash, EscortNPC
     from ..data.items import Inventory, item_display_name, RELIC_DEFINITIONS
     from .world import World, circle_rect_overlap
 else:
     from Sobrevivencia.config.runtime import optional_import
     from Sobrevivencia.data.constants import *
-    from Sobrevivencia.core.entities import Drop, Enemy, Player, Projectile, Slash
+    from Sobrevivencia.data.stamps import stamp_total_bonus
+    from Sobrevivencia.core.entities import Drop, Enemy, Player, Projectile, Slash, EscortNPC
     from Sobrevivencia.data.items import Inventory, item_display_name, RELIC_DEFINITIONS
     from Sobrevivencia.core.world import World, circle_rect_overlap
 
@@ -94,10 +96,41 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
         self.spawn_timer = 0.2
         self.enemy_id = 1
         self.screen_shake = 0.0
-        self.special_blast_timer = 0.0
+        self.time_warp_timer = 0.0
         self.special_box_timer = 12.0
+        self.special_blast_timer = 0.0
+        self.magnet_timer = 0.0
+        self.drones = []
+        self.escort_event_active = False
+        self.escort_state = None
+        self.escort_npcs = []
+        self.escort_spawn_pos = Vector2(0, 0)
+        self.escort_extract_pos = Vector2(0, 0)
+        self.next_escort_timer = 180.0  # 3 minutos para o PRIMEIRO evento
+        self.prev_escort_state = ""
+        self._first_escort_done = False
+        self.escort_post_event_timer = 0.0
+        self.heat_level = 0.0
+        self.player_constructs = []
+        self.player_debuffs = {}
+        self.day_night_timer = 0.0
+        self.light_level = 1.0
+        self.torch_cooldowns = {0: 0.0, 1: 0.0}
+        self.altars = []
+        self.active_altar = None
+        self.altar_spawn_timer = 20.0
+        self.time_scale = 1.0
+        self.menu_just_opened_by_altar = None
+        self.black_market_cooldown = 0.0
+        self.stat_shop_cooldown = 0.0
+        self.stat_shop_rerolls = 0
+        self.pity_counter = 0
+        self.current_dimension = "main"
         self.item_events = []
         self.particle_events = []
+        self.stamp_fusion_target = None
+        self.stamp_fusion_materials = []
+        self.stamp_fusion_msg = ""
         self.message = "Sobreviva o maximo que puder."
         self.random = random.Random()
         self.chromatic_spawn_timer = self.random.uniform(CHROMATIC_SPAWN_MIN, CHROMATIC_SPAWN_MAX)
@@ -298,6 +331,69 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
         )
         return max(0.75, RELOAD_DURATION * (1.0 - min(0.35, reload_bonus)))
 
+    @property
+    def is_night(self):
+        return self.light_level < 0.1
+
+    @property
+    def phase_info(self):
+        t = self.day_night_timer
+        if t < 60.0:
+            return "dia", 60.0 - t
+        elif t < 75.0:
+            return "entardecer", 75.0 - t
+        elif t < 110.0:
+            return "noite", 110.0 - t
+        else:
+            return "amanhecer", 120.0 - t
+
+    @property
+    def light_color(self):
+        r = int(255 * self.light_level + 12 * (1.0 - self.light_level))
+        g = int(255 * self.light_level + 16 * (1.0 - self.light_level))
+        b = int(255 * self.light_level + 32 * (1.0 - self.light_level))
+        return (r, g, b)
+
+    def try_place_light(self, player_index):
+        if player_index >= len(self.players):
+            return
+        player = self.players[player_index]
+        
+        # Check cooldown
+        if self.torch_cooldowns.get(player_index, 0.0) > 0.0:
+            self.message = "Tocha em recarga!"
+            return
+            
+        # Count existing torches of this owner
+        torches = [c for c in self.player_constructs if c.kind == "torch" and c.owner == player_index]
+        if len(torches) >= 3:
+            oldest = torches[0]
+            if oldest in self.player_constructs:
+                self.player_constructs.remove(oldest)
+                
+        spawn_pos = Vector2(player.pos)
+        
+        try:
+            from .entities import PlayerConstruct
+        except ImportError:
+            from Sobrevivencia.core.entities import PlayerConstruct
+
+        torch = PlayerConstruct(
+            pos=spawn_pos,
+            kind="torch",
+            hp=100.0,
+            max_hp=100.0,
+            radius=12.0,
+            duration=60.0,
+            owner=player_index,
+            level=1
+        )
+        
+        self.player_constructs.append(torch)
+        self.torch_cooldowns[player_index] = 15.0
+        self.message = "Tocha implantada!"
+        self.emit_particles(spawn_pos, count=15, color="#F97316", speed=80)
+
 
 
 
@@ -325,7 +421,66 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
             return
 
         dt = min(dt, 0.05)
+        
+        # Update player debuffs
+        debuffs = getattr(self, 'player_debuffs', {})
+        for pi in list(debuffs.keys()):
+            d = debuffs[pi]
+            if d.get("movement_slow_timer", 0.0) > 0.0:
+                d["movement_slow_timer"] = max(0.0, d["movement_slow_timer"] - dt)
+                
+        # Update shop cooldowns
+        if getattr(self, 'black_market_cooldown', 0.0) > 0.0:
+            self.black_market_cooldown = max(0.0, self.black_market_cooldown - dt)
+        if getattr(self, 'stat_shop_cooldown', 0.0) > 0.0:
+            self.stat_shop_cooldown = max(0.0, self.stat_shop_cooldown - dt)
+
         self.time_alive += dt
+
+        # Atualiza o ciclo de Dia/Noite
+        cycle_duration = 120.0
+        self.day_night_timer = (self.day_night_timer + dt) % cycle_duration
+        t = self.day_night_timer
+        if t < 60.0:
+            self.light_level = 1.0
+        elif t < 75.0:
+            self.light_level = 1.0 - (t - 60.0) / 15.0
+        elif t < 110.0:
+            self.light_level = 0.0
+        else:
+            self.light_level = (t - 110.0) / 10.0
+
+        # Decrementa recargas de tocha
+        for pi in list(self.torch_cooldowns.keys()):
+            if self.torch_cooldowns[pi] > 0.0:
+                self.torch_cooldowns[pi] = max(0.0, self.torch_cooldowns[pi] - dt)
+        
+        # Scale dt based on bullet time (time_scale)
+        if getattr(self, 'time_scale', 1.0) != 1.0:
+            dt *= self.time_scale
+            
+        if getattr(self, 'time_warp_timer', 0) > 0:
+            self.time_warp_timer -= dt
+            dt *= 0.15
+        
+        # Lógica da Dimensão de Bolso (Pocket Dimension)
+        if getattr(self, "current_dimension", "main") == "pocket":
+            self.pocket_dimension_timer = getattr(self, "pocket_dimension_timer", 30.0) - dt
+            for p in self.alive_players():
+                p.health = max(0.0, p.health - 1.5 * dt)
+                if self.random.random() < dt * 0.4:
+                    self.add_floater(p.pos, "-1.5 HP/s VOZ", "#C084FC")
+            
+            if self.pocket_dimension_timer <= 0.0:
+                self.current_dimension = "main"
+                self.message = "Sobreviveu ao Vazio! Caixa Lendaria obtida!"
+                for p in self.alive_players():
+                    orig = getattr(p, "original_pos", p.pos)
+                    p.pos = Vector2(orig)
+                    if p.body:
+                        p.body.position = p.pos.x, p.pos.y
+                    self.spawn_drop("item_box", p.pos, 1)
+
         self._player_in_fire = False
         self.world.ensure_area(self.player.pos, 2)
         self._update_director(dt)
@@ -349,12 +504,103 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
         self._update_projectiles(dt)
         self._update_slashes(dt)
         self._update_enemies(dt)
+        self._update_constructs(dt)
         self._update_hazards(dt)
         self._update_item_system(dt)
         self._update_relic_aura(dt)
         self._update_drops(dt)
         self._update_floaters(dt)
         self._update_quests(dt)
+        self._update_altars(dt)
+        
+        # Heat (Threat) Gauge Decay
+        self.heat_level = max(0.0, getattr(self, "heat_level", 0.0) - 1.8 * dt)
+        
+        # Escort NPCs Self-Defense
+        if getattr(self, "escort_event_active", False) and getattr(self, "escort_state", "") == "escorting":
+            for npc in getattr(self, "escort_npcs", []):
+                if getattr(npc, "hp", 0) <= 0:
+                    continue
+                npc.shoot_timer = getattr(npc, "shoot_timer", 0.0) - dt
+                if npc.shoot_timer <= 0.0:
+                    closest_enemy = None
+                    closest_dist = 450.0
+                    for enemy in self.enemies:
+                        if enemy.health <= 0:
+                            continue
+                        dist = npc.pos.distance_to(enemy.pos)
+                        if dist < closest_dist:
+                            closest_dist = dist
+                            closest_enemy = enemy
+                    
+                    if closest_enemy is not None:
+                        dir_vector = (closest_enemy.pos - npc.pos).normalize()
+                        self.projectiles.append(
+                            Projectile(
+                                pos=Vector2(npc.pos) + dir_vector * (npc.radius + 8),
+                                vel=dir_vector * 620.0,
+                                damage=18.0,
+                                freeze=False,
+                                poison=False,
+                                poison_dps=0.0,
+                                bounces_left=0,
+                                pierce=0,
+                                owner=0,
+                            )
+                        )
+                        npc.shoot_timer = 0.6
+
+        # Check Escort Success transition to grant Drone reward
+        curr_escort_state = getattr(self, "escort_state", "")
+        prev_escort_state = getattr(self, "prev_escort_state", "")
+        if prev_escort_state == "escorting" and curr_escort_state != "escorting":
+            survived = any(getattr(npc, "hp", 0) > 0 for npc in getattr(self, "escort_npcs", []))
+            if survived:
+                self.drones.append({
+                    "angle": 0.0,
+                    "shoot_timer": 0.0,
+                })
+                self.message = "MISSAO CUMPRIDA: Drone Mascote Concedido!"
+        self.prev_escort_state = curr_escort_state
+
+        # Update orbital Drones Mascot
+        for drone in getattr(self, "drones", []):
+            drone["angle"] += 3.0 * dt
+            orbit_radius = 55.0
+            drone_x = self.player.pos.x + math.cos(drone["angle"]) * orbit_radius
+            drone_y = self.player.pos.y + math.sin(drone["angle"]) * orbit_radius
+            drone_pos = Vector2(drone_x, drone_y)
+            drone["pos"] = drone_pos
+
+            drone["shoot_timer"] -= dt
+            if drone["shoot_timer"] <= 0.0:
+                closest_enemy = None
+                closest_dist = 400.0
+                for enemy in self.enemies:
+                    if enemy.health <= 0:
+                        continue
+                    dist = drone_pos.distance_to(enemy.pos)
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        closest_enemy = enemy
+                
+                if closest_enemy is not None:
+                    dir_vector = (closest_enemy.pos - drone_pos).normalize()
+                    self.projectiles.append(
+                        Projectile(
+                            pos=Vector2(drone_pos) + dir_vector * 6,
+                            vel=dir_vector * 580.0,
+                            damage=14.0,
+                            freeze=False,
+                            poison=False,
+                            poison_dps=0.0,
+                            bounces_left=0,
+                            pierce=0,
+                            owner=0,
+                        )
+                    )
+                    drone["shoot_timer"] = 0.7
+
         self._update_camera(dt)
         self.screen_shake = max(0, self.screen_shake - SCREEN_SHAKE_DECAY * 20 * dt)
         self.special_blast_timer = max(0, self.special_blast_timer - dt)
@@ -444,6 +690,34 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
             velocity = move_vector * speed
 
         player.pos = self.world.move_circle(player.pos, player.radius, velocity * dt)
+
+        # Restrição da Arena do Miniboss
+        center = getattr(self, "miniboss_arena_center", None)
+        if center is not None:
+            is_trapped = (getattr(self, "miniboss_trapped_player", None) == player) if getattr(self, "miniboss_trapped_player", None) is not None else True
+            radius = getattr(self, "miniboss_arena_radius", 520.0)
+            dist = player.pos.distance_to(center)
+            if is_trapped:
+                if dist > radius:
+                    to_center = (center - player.pos).normalize()
+                    player.pos = center + (player.pos - center).normalize() * radius
+                    damage_taken = 6.0 * dt
+                    # Apply knockback if player has a knockback property, or just apply it
+                    # We can use player.knockback += to_center * 150.0
+                    if hasattr(player, "knockback"):
+                        player.knockback += to_center * 150.0
+                    self._damage_player_direct(player, damage_taken)
+                    self.message = "Fugindo da Arena do Miniboss! Sofrendo dano!"
+            else:
+                if dist < radius:
+                    to_outside = (player.pos - center).normalize()
+                    player.pos = center + to_outside * radius
+                    damage_taken = 6.0 * dt
+                    if hasattr(player, "knockback"):
+                        player.knockback += to_outside * 150.0
+                    self._damage_player_direct(player, damage_taken)
+                    self.message = "Impossivel entrar na Arena do Miniboss!"
+
         if player.body:
             player.body.position = player.pos.x, player.pos.y
             player.body.velocity = 0, 0
@@ -465,27 +739,36 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
         blade = inv.active_effect_level("blade_relay")
         hybrid = inv.active_hybrid_level()
         both_bonus = player.passives.get("combat_drill", 0) * 0.01 + player.passives.get("predator_focus", 0) * 0.012
-        return player.attack_rate_multiplier() * (1.0 + blade * 0.012 + hybrid * 0.01 + both_bonus)
+        stamp_bonus = stamp_total_bonus(player, player.mode, "haste")
+        return player.attack_rate_multiplier() * (1.0 + blade * 0.012 + hybrid * 0.01 + both_bonus + stamp_bonus)
 
     def projectile_damage_for(self, player, inv):
         storm = inv.active_effect_level("storm_core")
+        stamp_bonus = stamp_total_bonus(player, "weapon_1", "impact")
         ranged_mult = (
             1.0
             + player.passives.get("combat_drill", 0) * 0.025
             + player.passives.get("predator_focus", 0) * 0.020
             + player.passives.get("piercing_rounds", 0) * 0.015
+            + stamp_bonus
         )
         return player.projectile_damage() * (1.0 + storm * 0.01) * ranged_mult
 
     def sword_damage_for(self, player, inv):
         blade = inv.active_effect_level("blade_relay")
+        stamp_bonus = stamp_total_bonus(player, "weapon_2", "impact")
         melee_mult = (
             1.0
             + player.passives.get("combat_drill", 0) * 0.025
             + player.passives.get("predator_focus", 0) * 0.020
             + player.passives.get("fan_blades", 0) * 0.018
+            + stamp_bonus
         )
         return player.sword_damage() * (1.0 + blade * 0.012) * melee_mult
+
+    def projectile_radius_for(self, player, base_radius=PROJECTILE_RADIUS):
+        caliber_bonus = stamp_total_bonus(player, "weapon_1", "caliber")
+        return base_radius * (1.0 + caliber_bonus)
 
     def sword_radius_for(self, player, inv):
         blade = inv.active_effect_level("blade_relay")
@@ -568,6 +851,98 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
         for chunk in self.world.chunks.values():
             for item in chunk["destructibles"]:
                 item.hit_flash = max(0, item.hit_flash - dt)
+
+        # Escort Event Timer & State Machine
+        if not self.escort_event_active:
+            self.next_escort_timer = getattr(self, "next_escort_timer", 180.0) - dt
+            if self.next_escort_timer <= 0.0:
+                self._trigger_escort_event()
+        else:
+            self._update_escort_event(dt)
+
+    def _trigger_escort_event(self):
+        self.escort_event_active = True
+        self.escort_state = "seeking_spawn"
+        
+        # Spawn position: random angle, 900px distance from player
+        angle = self.random.uniform(0, 2 * math.pi)
+        spawn_dist = 900.0
+        self.escort_spawn_pos = self.player.pos + Vector2(math.cos(angle), math.sin(angle)) * spawn_dist
+        
+        # Extraction position: random angle, 1600px distance from spawn position
+        extract_angle = self.random.uniform(0, 2 * math.pi)
+        extract_dist = 1600.0
+        self.escort_extract_pos = self.escort_spawn_pos + Vector2(math.cos(extract_angle), math.sin(extract_angle)) * extract_dist
+        
+        self.escort_npcs = []
+        self.message = "MISSAO DE ESCOLTA: Encontre os aliados!"
+
+    def _update_escort_event(self, dt):
+        if self.escort_state == "seeking_spawn":
+            # Check if any alive player reaches the spawn zone
+            player_reached = False
+            for player in self.alive_players():
+                if player.pos.distance_to(self.escort_spawn_pos) <= 150.0:
+                    player_reached = True
+                    break
+            if player_reached:
+                self.escort_state = "escorting"
+                self.escort_npcs = [
+                    EscortNPC(
+                        pos=Vector2(self.escort_spawn_pos) + Vector2(-15, -15),
+                        hp=120.0,
+                        max_hp=120.0,
+                        speed=85.0,
+                        kind="soldier",
+                    ),
+                    EscortNPC(
+                        pos=Vector2(self.escort_spawn_pos) + Vector2(15, 15),
+                        hp=150.0,
+                        max_hp=150.0,
+                        speed=80.0,
+                        kind="executive",
+                    ),
+                ]
+                self.message = "MISSAO DE ESCOLTA: Proteja os aliados ate o ponto de extracao!"
+        
+        elif self.escort_state == "escorting":
+            # Update NPCs movement and hit flash decay
+            npcs_alive = 0
+            reached_extract = 0
+            for npc in self.escort_npcs:
+                if npc.hp <= 0:
+                    continue
+                npcs_alive += 1
+                npc.hit_flash = max(0, npc.hit_flash - dt)
+                
+                # Move towards extraction point
+                to_extract = self.escort_extract_pos - npc.pos
+                dist = to_extract.length()
+                if dist > 50.0:
+                    dir_vector = to_extract.normalize()
+                    npc.pos += dir_vector * npc.speed * dt
+                else:
+                    reached_extract += 1
+            
+            # Check Failure
+            if npcs_alive == 0:
+                self.escort_state = "failed"
+                self.message = "MISSAO FALHOU: Todos os aliados morreram."
+                self.escort_post_event_timer = 5.0
+            
+            # Check Success: if all alive NPCs reached the extraction point
+            elif reached_extract == npcs_alive:
+                self.escort_state = "completed"
+                self.escort_post_event_timer = 5.0
+                
+        elif self.escort_state in ("completed", "failed"):
+            # Hold the completed/failed state for 5 seconds, then reset
+            self.escort_post_event_timer = getattr(self, "escort_post_event_timer", 5.0) - dt
+            if self.escort_post_event_timer <= 0.0:
+                self.escort_event_active = False
+                self.escort_state = None
+                self.escort_npcs = []
+                self.next_escort_timer = 240.0  # 4 minutos para o PROXIMO evento
 
 
 
@@ -731,3 +1106,169 @@ class GameLogic(CombatManager, EnemyManager, ItemManager, QuestManager):
             for enemy in list(self.enemies):
                 if enemy.pos.distance_to(player.pos) <= aura_radius + enemy.radius:
                     self.damage_enemy(enemy, 8.0 * dt, source="relic", killer_index=player.player_index)
+
+    def _update_constructs(self, dt):
+        alive = []
+        for c in self.player_constructs:
+            c.age += dt
+            if c.hit_flash > 0:
+                c.hit_flash -= dt
+                
+            if c.hp <= 0 or c.age >= c.duration:
+                self.emit_particles(c.pos, count=15, color="#FBBF24" if c.kind == "turret" else ("#F97316" if c.kind == "torch" else "#38BDF8"), speed=100)
+                continue
+                
+            if c.kind == "turret":
+                owner_player = self.get_player(c.owner)
+                reinforced = owner_player.passives.get("reinforced_turrets", 0)
+                overclock = owner_player.passives.get("overclock", 0)
+                c.attack_timer -= dt
+                best_dist = 300**2
+                best_enemy = None
+                for enemy in self.enemies:
+                    d = enemy.pos.distance_squared_to(c.pos)
+                    if d < best_dist:
+                        best_dist = d
+                        best_enemy = enemy
+                if best_enemy:
+                    desired = math.atan2(best_enemy.pos.y - c.pos.y, best_enemy.pos.x - c.pos.x)
+                    delta = (desired - c.angle + math.pi) % (math.tau) - math.pi
+                    c.angle += delta * min(1.0, dt * 9.0)
+                if c.attack_timer <= 0:
+                    if best_enemy:
+                        direction = (best_enemy.pos - c.pos).normalize()
+                        inv = self.get_inventory(c.owner)
+                        
+                        damage = self.projectile_damage_for(owner_player, inv) * (1.2 + reinforced * 0.18)
+                        self.projectiles.append(
+                            Projectile(
+                                pos=Vector2(c.pos) + direction * c.radius,
+                                vel=direction * PROJECTILE_SPEED * 1.5,
+                                damage=damage,
+                                radius=self.projectile_radius_for(owner_player, PROJECTILE_RADIUS * 1.2),
+                                owner=c.owner
+                            )
+                        )
+                        c.attack_timer = max(0.18, 0.6 - reinforced * 0.045 - overclock * 0.025)
+                        
+            elif c.kind == "barrier":
+                owner_player = self.get_player(c.owner)
+                shock_level = owner_player.passives.get("shocking_barrier", 0)
+                overclock = owner_player.passives.get("overclock", 0)
+                c.attack_timer -= dt
+                if c.attack_timer <= 0:
+                    for enemy in self.enemies:
+                        d_sq = enemy.pos.distance_squared_to(c.pos)
+                        if d_sq <= (c.radius + enemy.radius + 15)**2:
+                            self.damage_enemy(enemy, c.max_hp * 0.15 * (1 + shock_level * 0.16), source="special", killer_index=c.owner)
+                            diff = enemy.pos - c.pos
+                            if diff.length_squared() > 0:
+                                enemy.knockback += diff.normalize() * (200 + shock_level * 45)
+                            enemy.hit_flash = 0.2
+                            self.emit_particles(enemy.pos, count=3, color="#0EA5E9", speed=100)
+                    c.attack_timer = max(0.18, 0.3 - overclock * 0.012)
+            elif c.kind == "torch":
+                c.attack_timer -= dt
+                if c.attack_timer <= 0:
+                    self.emit_particles(c.pos + Vector2(0, -6), count=1, color="#F97316", speed=20, lifetime=0.4, size=3)
+                    c.attack_timer = 0.15
+            
+            alive.append(c)
+        self.player_constructs = alive
+
+    def spawn_altar(self):
+        angle = self.random.random() * math.tau
+        distance = self.random.uniform(400.0, 600.0)
+        spawn_pos = self.player.pos + Vector2(math.cos(angle), math.sin(angle)) * distance
+        
+        # Ensure position is inside world boundaries
+        spawn_pos = self.world.move_circle(spawn_pos, 24.0, Vector2(0, 0))
+        
+        kinds = ["weapon_altar", "skill_altar", "stat_altar"]
+        kind = self.random.choice(kinds)
+        
+        try:
+            from .entities import Altar
+        except ImportError:
+            from Sobrevivencia.core.entities import Altar
+            
+        new_altar = Altar(pos=spawn_pos, kind=kind)
+        self.altars.append(new_altar)
+        
+        names = {
+            "weapon_altar": "Armas (Inventario)",
+            "skill_altar": "Habilidades (Passivas)",
+            "stat_altar": "Status"
+        }
+        self.message = f"Um Altar de {names[kind]} se manifestou na arena!"
+        if hasattr(self, 'add_floater'):
+            self.add_floater(spawn_pos, "ALTAR", COLORS["special"])
+
+    def _update_altars(self, dt):
+        alive = []
+        for altar in self.altars:
+            altar.age += dt
+            if altar.hit_flash > 0:
+                altar.hit_flash -= dt
+            
+            if altar.active:
+                alive.append(altar)
+                
+                # Check collision with alive players
+                if self.active_altar is None:
+                    for player in self.alive_players():
+                        if player.pos.distance_to(altar.pos) <= player.radius + altar.radius:
+                            self.active_altar = altar
+                            self.time_scale = 0.2  # Bullet Time / Slow motion
+                            self.menu_player_index = player.player_index
+                            self.menu_just_opened_by_altar = altar.kind
+                            self.message = "Altar ativado! Selecione seus aprimoramentos."
+                            self.emit_particles(altar.pos, count=25, color="#F59E0B", speed=150)
+                            break
+            else:
+                self.emit_particles(altar.pos, count=30, color="#EF4444", speed=200)
+                
+        self.altars = alive
+        
+        if getattr(self, 'altar_spawn_timer', 0.0) > 0.0:
+            self.altar_spawn_timer -= dt
+            if self.altar_spawn_timer <= 0.0:
+                self.spawn_altar()
+                self.altar_spawn_timer = 90.0
+
+    def finish_altar_interaction(self, destroy=True):
+        altar = getattr(self, "active_altar", None)
+        if altar is not None and destroy:
+            altar.active = False
+            self.emit_particles(altar.pos, count=36, color="#F59E0B", speed=220)
+            self.screen_shake = max(self.screen_shake, 10.0)
+        self.active_altar = None
+        self.menu_just_opened_by_altar = None
+        self.time_scale = 1.0
+
+    def roll_upgrade_rng(self, player_index, attempted_levels=1):
+        attempted_levels = max(1, int(attempted_levels))
+        greed = min(0.30, max(0, attempted_levels - 1) * 0.04)
+
+        super_chance = 0.10 + self.pity_counter * 0.15
+        success_chance = max(0.18, 0.58 - greed)
+        partial_chance = 0.22 + greed * 0.55
+        fail_chance = 0.10 + greed * 0.45
+
+        total = super_chance + success_chance + partial_chance + fail_chance
+        super_chance /= total
+        success_chance /= total
+        partial_chance /= total
+
+        r = self.random.random()
+        if r < super_chance:
+            self.pity_counter = 0
+            return "super"
+        if r < super_chance + success_chance:
+            self.pity_counter = 0
+            return "sucesso"
+        if r < super_chance + success_chance + partial_chance:
+            self.pity_counter += 1
+            return "parcial"
+        self.pity_counter += 1
+        return "falha"

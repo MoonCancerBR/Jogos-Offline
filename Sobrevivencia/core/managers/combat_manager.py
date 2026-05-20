@@ -2,10 +2,12 @@ from pygame.math import Vector2
 import math
 if __package__:
     from ...data.constants import *
+    from ...data.stamps import ALL_DROPPABLE_STAMP_KEYS, stamp_effect_value, stamps_equipped_for_weapon
     from ..entities import Projectile, Slash
     from ..world import circle_rect_overlap
 else:
     from Sobrevivencia.data.constants import *
+    from Sobrevivencia.data.stamps import ALL_DROPPABLE_STAMP_KEYS, stamp_effect_value, stamps_equipped_for_weapon
     from Sobrevivencia.core.entities import Projectile, Slash
     from Sobrevivencia.core.world import circle_rect_overlap
 
@@ -451,6 +453,7 @@ class CombatManager:
                                 pos=Vector2(player.pos) + direction * (player.radius + 8) + offset,
                                 vel=direction * PROJECTILE_SPEED,
                                 damage=self.projectile_damage_for(player, inv),
+                                radius=self.projectile_radius_for(player),
                                 freeze=player.buffs.get("freeze", 0) > 0,
                                 poison=player.passives.get("poison", 0) > 0,
                                 poison_dps=POISON_BASE_DPS * player.passives.get("poison", 0) * player.damage_multiplier(),
@@ -500,6 +503,7 @@ class CombatManager:
                                 pos=Vector2(player.pos) + shot_dir * (player.radius + 8),
                                 vel=shot_dir * PROJECTILE_SPEED * 1.5,
                                 damage=self.projectile_damage_for(player, inv) * (1.2 if not extra else 0.58 + split_level * 0.018),
+                                radius=self.projectile_radius_for(player),
                                 freeze=player.buffs.get("freeze", 0) > 0,
                                 pierce=2 if not extra else max(0, split_level // 5),
                                 explosive_level=player.passives.get("explosive", 0),
@@ -597,7 +601,8 @@ class CombatManager:
                     if projectile.poison:
                         enemy.poison_timer = max(enemy.poison_timer, POISON_DURATION)
                         enemy.poison_dps = max(enemy.poison_dps, projectile.poison_dps)
-                    self.damage_enemy(enemy, projectile.damage, source="projectile")
+                    self.damage_enemy(enemy, projectile.damage, source="projectile", killer_index=projectile.owner)
+                    self._apply_stamp_on_hit(enemy, projectile.damage, "weapon_1", projectile.owner)
 
                     if projectile.pierce > 0:
                         projectile.pierce -= 1
@@ -688,6 +693,7 @@ class CombatManager:
                     owner.dash_cooldown = max(0, owner.dash_cooldown - 0.035 * slash.shadow_lunge_level)
                     owner.invulnerable_timer = max(owner.invulnerable_timer, 0.02 * slash.shadow_lunge_level)
                 self.damage_enemy(enemy, damage, source="sword", killer_index=slash.owner)
+                self._apply_stamp_on_hit(enemy, damage, "weapon_2", slash.owner)
                 if slash.shockwave_level > 0:
                     self._apply_slash_shockwave(hit_pos, slash.shockwave_level, slash.damage, slash.hit_ids)
 
@@ -716,6 +722,36 @@ class CombatManager:
             if push.length_squared() > 0:
                 other.knockback += push.normalize() * (95 + level * 8)
             self.damage_enemy(other, damage, source="sword")
+
+    def _apply_stamp_on_hit(self, enemy, damage, weapon_key, owner_index=0):
+        player = self.get_player(owner_index)
+        for stamp in stamps_equipped_for_weapon(player, weapon_key):
+            value = stamp_effect_value(stamp)
+            if stamp.key == "lifesteal" and player.health < player.max_health:
+                heal = min(player.max_health - player.health, damage * value)
+                if heal > 0:
+                    player.health += heal
+                    self.add_floater(player.pos, f"+{heal:.0f}", COLORS["health"])
+            elif stamp.key == "blast" and self.random.random() < value:
+                self.item_events.append({
+                    "type": "explosion",
+                    "pos": Vector2(enemy.pos),
+                    "radius": 54 + stamp.level * 12,
+                    "damage": damage * 0.30,
+                    "age": 0,
+                    "duration": 0.22,
+                    "owner": owner_index,
+                })
+                self.emit_particles(enemy.pos, count=12, color="#F97316", speed=130, size=4)
+            elif stamp.key == "frost" and self.random.random() < value:
+                enemy.frozen_timer = max(enemy.frozen_timer, 3.0)
+            elif stamp.key == "toxic" and self.random.random() < value:
+                enemy.poison_timer = max(enemy.poison_timer, 4.0)
+                enemy.poison_dps = max(enemy.poison_dps, 12.0 + stamp.level * 3.0)
+            elif stamp.key == "repulse":
+                push = enemy.pos - player.pos
+                if push.length_squared() > 0:
+                    enemy.knockback += push.normalize() * value
 
     def _damage_player(self, amount, source="hit"):
         if amount <= 0 or self.player.shield_timer > 0 or self.player.invulnerable_timer > 0:
@@ -804,6 +840,32 @@ class CombatManager:
                     if protector.pos.distance_squared_to(enemy.pos) <= 220 * 220:
                         amount *= 0.72
                         break
+
+        # Reações Elementares e Combos
+        # 1. Choque Térmico: Dano físico/corte/tiro em inimigo Congelado
+        if getattr(enemy, "frozen_timer", 0.0) > 0.0:
+            enemy.frozen_timer = 0.0
+            shock_damage = amount * 1.5 + 60.0
+            amount += shock_damage
+            self.add_floater(enemy.pos, "CHOQUE TERMICO!", "#38BDF8")
+            self.emit_particles(enemy.pos, count=16, color="#06B6D4", speed=150, size=4)
+            self.screen_shake = max(self.screen_shake, 3.5)
+
+        # 2. Hemotoxina: Veneno + Sangramento ativos simultaneamente
+        if getattr(enemy, "poison_timer", 0.0) > 0.0 and getattr(enemy, "bleed_timer", 0.0) > 0.0:
+            p_dps = getattr(enemy, "poison_dps", 0.0)
+            b_dps = getattr(enemy, "bleed_dps", 0.0)
+            enemy.poison_timer = 0.0
+            enemy.bleed_timer = 0.0
+            toxin_damage = (p_dps + b_dps) * 4.0
+            if toxin_damage <= 0:
+                toxin_damage = 50.0
+            amount += toxin_damage
+            self.add_floater(enemy.pos, "HEMOTOXINA!", "#A855F7")
+            self.emit_particles(enemy.pos, count=18, color="#10B981", speed=160, size=4)
+            self.emit_particles(enemy.pos, count=18, color="#8B5CF6", speed=160, size=4)
+            self.screen_shake = max(self.screen_shake, 4.0)
+
         enemy.health -= amount
         enemy.hit_flash = 0.08
         self.emit_particles(enemy.pos, count=3, color="#DC2626", speed=80, size=3)
@@ -818,6 +880,22 @@ class CombatManager:
         killer.kills += 1
         self.emit_particles(enemy.pos, count=15, color="#991B1B", speed=120, size=5)
         killer.score += int(enemy.xp_value * 10 + self.time_alive)
+
+        # Increase dynamic heat level on kill!
+        gain = 3.5
+        ekind = getattr(enemy, "kind", "")
+        if ekind == "brute":
+            gain = 12.0
+        elif ekind == "sapper":
+            gain = 7.0
+        elif ekind == "phantom":
+            gain = 6.0
+        elif ekind == "miniboss":
+            gain = 35.0
+        elif ekind in ("morcego_sombra", "lobo_infectado"):
+            gain = 8.0
+            
+        self.heat_level = min(100.0, getattr(self, "heat_level", 0.0) + gain)
 
         # Quest hooks (team-based)
         if self.quest:
@@ -844,12 +922,25 @@ class CombatManager:
         ammo_amount = self._ammo_drop_amount(enemy)
         if ammo_amount > 0:
             self.spawn_drop("ammo", enemy.pos + self.random_offset(20), ammo_amount)
-        if self.random.random() < enemy.coin_chance:
+        heat_ratio = getattr(self, "heat_level", 0.0) / 100.0
+        coin_chance = enemy.coin_chance + heat_ratio * 0.15
+        heal_chance = 0.035 + heat_ratio * 0.02
+        shield_chance = 0.018 + heat_ratio * 0.015
+        box_chance = heat_ratio * 0.025
+
+        if self.random.random() < coin_chance:
             self.spawn_drop("coin", enemy.pos + self.random_offset(18), 1)
-        if self.random.random() < 0.035:
+        if self.random.random() < heal_chance:
             self.spawn_drop("heal", enemy.pos + self.random_offset(22), 22)
-        if self.random.random() < 0.018:
+        if self.random.random() < shield_chance:
             self.spawn_drop("shield", enemy.pos + self.random_offset(22), 1)
+        if self.random.random() < box_chance:
+            self.spawn_drop("item_box", enemy.pos + self.random_offset(24), 1)
+        stamp_chance = 0.010 + heat_ratio * 0.030
+        if enemy.kind in ("brute", "chromatic", "miniboss"):
+            stamp_chance += 0.020
+        if self.random.random() < stamp_chance:
+            self.spawn_drop("stamp", enemy.pos + self.random_offset(28), self.random.choice(ALL_DROPPABLE_STAMP_KEYS))
         if enemy.kind == "chromatic":
             self._grant_random_reward(enemy.pos, strong=False, player_index=killer_index)
 
@@ -868,6 +959,11 @@ class CombatManager:
             return
 
         self.spawn_drop("coin", center + self.random_offset(18), 1)
+        
+        # Rare chance of global magnet (vacuum)
+        if self.random.random() < 0.025:
+            self.spawn_drop("vacuum", center + self.random_offset(20), 1)
+            
         roll = self.random.random()
         if roll < 0.18:
             self.spawn_drop("heal", center + self.random_offset(22), 20)

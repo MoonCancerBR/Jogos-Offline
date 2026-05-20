@@ -341,6 +341,61 @@ ENEMY_TYPES = {
         "special": 3,
         "coin_chance": 0.0,
     },
+    "phantom": {
+        "name": "Espectro Intangivel",
+        "radius": 18,
+        "speed": 135.0,
+        "health": 48,
+        "damage": 12.0,
+        "xp": 22,
+        "color": "#D8B4FE",
+        "special": 15,
+        "coin_chance": 0.20,
+    },
+    "golem": {
+        "name": "Golem de Magnetita",
+        "radius": 26,
+        "speed": 72.0,
+        "health": 145,
+        "damage": 28.0,
+        "xp": 35,
+        "color": "#475569",
+        "special": 20,
+        "coin_chance": 0.35,
+    },
+    "necromancer": {
+        "name": "Invocador Sombrio",
+        "radius": 22,
+        "speed": 98.0,
+        "health": 85,
+        "damage": 15.0,
+        "xp": 42,
+        "color": "#9333EA",
+        "special": 25,
+        "coin_chance": 0.40,
+    },
+    "morcego_sombra": {
+        "name": "Morcego Sombra",
+        "radius": 12,
+        "speed": 230.0,
+        "health": 22,
+        "damage": 10.0,
+        "xp": 12,
+        "color": "#C084FC",
+        "special": 6,
+        "coin_chance": 0.08,
+    },
+    "lobo_infectado": {
+        "name": "Lobo Infectado",
+        "radius": 18,
+        "speed": 185.0,
+        "health": 58,
+        "damage": 24.0,
+        "xp": 22,
+        "color": "#FB7185",
+        "special": 14,
+        "coin_chance": 0.18,
+    },
 }
 
 UPGRADES = {
@@ -541,6 +596,82 @@ CHARACTERS = {
                 "description": "Chuva de Flechas dura mais e cobre área maior.",
             },
         }
+    },
+    "engineer": {
+        "name": "O Engenheiro",
+        "color": "#FEF08A",
+        "core_color": "#EAB308",
+        "shape": "circle_square",
+        "weapon_1": "Canhão de Plasma",
+        "weapon_2": "Chave Magnética",
+        "special": "Torreta Sentinela",
+        "specials": {
+            "weapon_1": "Torreta Sentinela",
+            "weapon_2": "Barreira de Choque",
+            "combo": "Protocolo Ragnarok",
+        },
+        "passives": {
+            "plasma_aoe": {
+                "title": "Plasma Estendido",
+                "short": "PLA",
+                "category": "Distância",
+                "description": "Aumenta o raio da explosão dos tiros.",
+            },
+            "supercharge": {
+                "title": "Sobrecarga de Energia",
+                "short": "SOB",
+                "category": "Distância",
+                "description": "Tiros de plasma têm chance de dar curto-circuito.",
+            },
+            "heavy_alloy": {
+                "title": "Liga Pesada",
+                "short": "LIG",
+                "category": "Corpo a corpo",
+                "description": "Aumenta dano e empurrão da Chave.",
+            },
+            "magnetic_pull": {
+                "title": "Atração Magnética",
+                "short": "MAG",
+                "category": "Corpo a corpo",
+                "description": "Aumenta a força de atração ao golpear.",
+            },
+            "reinforced_turrets": {
+                "title": "Aço Estrutural",
+                "short": "ACO",
+                "category": "Especial",
+                "description": "Torretas duram mais e atiram mais rápido.",
+            },
+            "shocking_barrier": {
+                "title": "Cerca Elétrica",
+                "short": "CER",
+                "category": "Especial",
+                "description": "Barreiras causam mais dano ao colidir.",
+            },
+            "tech_scavenger": {
+                "title": "Reciclagem",
+                "short": "REC",
+                "category": "Ambas",
+                "description": "Abates rendem mais moedas e munição.",
+            },
+            "overclock": {
+                "title": "Overclock",
+                "short": "OVR",
+                "category": "Ambas",
+                "description": "Acelera as recargas passivas de tudo.",
+            },
+            "structural_shield": {
+                "title": "Escudo de Campo",
+                "short": "ESC",
+                "category": "Defesa",
+                "description": "Perto de construções ganha escudo.",
+            },
+            "core_meltdown": {
+                "title": "Fusão do Núcleo",
+                "short": "FUS",
+                "category": "Ultimate",
+                "description": "Ragnarok incendeia o chão deixando plasma.",
+            },
+        }
     }
 }
 
@@ -616,6 +747,7 @@ PAUSE_OPTIONS = [
     ("Gerenciamento de Skills", "skills"),
     ("Loja de Status", "stat_shop"),
     ("Construcoes", "constructions"),
+    ("Enciclopedia", "encyclopedia"),
     ("Comandos", "commands"),
     ("Configuracoes", "settings"),
     ("Mudar Modo de Jogo", "change_character"),
@@ -627,6 +759,7 @@ PAUSE_OPTIONS = [
 
 START_OPTIONS = [
     ("Iniciar Jogo", "character_select"),
+    ("Enciclopedia", "encyclopedia"),
     ("Comandos", "commands"),
     ("Configuracoes", "settings"),
     ("Voltar ao Menu", "menu"),
@@ -648,6 +781,7 @@ CONTROL_ACTIONS = [
     ("pause", "Pausar"),
     ("settings", "Configuracoes"),
     ("fullscreen", "Tela cheia"),
+    ("place_light", "Implantar Tocha"),
 ]
 
 
@@ -669,6 +803,7 @@ DEFAULT_BINDINGS = {
     "pause": [("key", pygame.K_ESCAPE), None, None],
     "settings": [("key", pygame.K_o), None, None],
     "fullscreen": [("key", pygame.K_F11), None, None],
+    "place_light": [("key", pygame.K_f), None, None],
 }
 
 
@@ -685,6 +820,7 @@ JOYSTICK_DEFAULT_BINDINGS = {
     "skills": ("joy_button", 5),
     "stat_shop": ("joy_button", 4),
     "pause": ("joy_button", 7),
+    "place_light": ("joy_button", 8),
 }
 
 

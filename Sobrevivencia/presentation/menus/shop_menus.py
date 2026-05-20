@@ -49,7 +49,8 @@ class ShopMenus:
             (offer['title'], offer['cost'], tuple(effect['display'] for effect in offer['effects']))
             for offer in game.stat_shop_offers
         )
-        signature = (game.stat_shop_unlocked(), game.inventory.points, offers_signature)
+        inv = game.get_inventory(game.menu_player_index)
+        signature = (game.stat_shop_unlocked(), inv.points, game.menu_player_index, offers_signature)
         
         if (not self.stat_shop_window or 
             not self.stat_shop_window.alive() or 
@@ -81,8 +82,9 @@ class ShopMenus:
         if self.stat_shop_window is None:
             return
             
-        points_label = 'Pontos da equipe' if game.multiplayer else 'Pontos disponiveis'
-        points_text = f"{points_label}: {game.inventory.points}"
+        inv = game.get_inventory(game.menu_player_index)
+        points_label = f'Pontos J{game.menu_player_index + 1}' if game.multiplayer else 'Pontos disponiveis'
+        points_text = f"{points_label}: {inv.points}"
         c.label(
             pygame.Rect((650, 10), (200, 30)),
             points_text,
@@ -111,6 +113,8 @@ class ShopMenus:
             return
             
         subtitle_text = f"Roletar abre 3 ofertas por {STAT_SHOP_ROLL_COST} ponto. Jogar novamente uma oferta custa {STAT_SHOP_REROLL_COST} ponto."
+        if getattr(game, "stat_shop_cooldown", 0.0) > 0:
+            subtitle_text = f"Loja bloqueada por {game.stat_shop_cooldown:.0f}s apos compra recente."
         c.label(
             pygame.Rect((20, 10), (860, 30)),
             subtitle_text,
@@ -127,8 +131,10 @@ class ShopMenus:
                 pygame.Rect((320, 260), (260, 50)),
                 f"Roletar ({STAT_SHOP_ROLL_COST} pt)",
                 container=self.stat_shop_window,
-                intent='primary'
+                intent='primary' if getattr(game, "stat_shop_cooldown", 0.0) <= 0 else 'muted'
             )
+            if getattr(game, "stat_shop_cooldown", 0.0) > 0:
+                btn.disable()
             self.stat_shop_buttons['roll'] = btn
             
             self.stat_shop_back_button = c.button(
@@ -146,6 +152,20 @@ class ShopMenus:
         y = 60
         
         for index, offer in enumerate(game.stat_shop_offers):
+            x = start_x + index * (card_w + gap)
+            is_selected = (index == selected)
+            
+            panel = c.panel(
+                pygame.Rect((x, y), (card_w, card_h)),
+                container=self.stat_shop_window
+            )
+            if is_selected:
+                c.panel(
+                    pygame.Rect((0, 0), (card_w, card_h)),
+                    container=panel,
+                    object_id=ObjectID(class_id='@selected_panel', object_id='#item_button')
+                )
+                
             x = start_x + index * (card_w + gap)
             is_selected = (index == selected)
             
@@ -181,22 +201,31 @@ class ShopMenus:
                 line_y += 50
                 
             cost = offer['cost']
+            altar_purchase = getattr(game, "active_altar", None) is not None and game.active_altar.kind == "stat_altar"
+            on_cooldown = getattr(game, "stat_shop_cooldown", 0.0) > 0
+            is_night = getattr(game, "light_level", 1.0) < 0.15
+            cost_text = "Custo: 20% Max HP (SANGUE)" if is_night else f"Custo: {cost} pts"
+            buy_text = "Pacto Sangrento" if is_night else (f"Comprar ({cost})" if altar_purchase else "Compra via Altar")
+            
             c.label(
                 pygame.Rect((10, card_h - 110), (card_w - 20, 20)),
-                f"Custo: {cost} pts",
+                cost_text,
                 container=panel
             )
             btn_buy = c.button(
                 pygame.Rect((10, card_h - 80), (card_w - 20, 30)),
-                f"Comprar ({cost})",
+                buy_text,
                 container=panel,
-                intent='primary'
+                intent='danger' if (altar_purchase and is_night) else ('primary' if altar_purchase and not on_cooldown else 'muted')
             )
+            if not altar_purchase or on_cooldown:
+                btn_buy.disable()
             self.stat_shop_buttons[index] = btn_buy
-            
+            rerolls = getattr(game, "stat_shop_offer_rerolls", {}).get(index, 0)
+            reroll_label = "Sacrificar -5 HP" if rerolls >= 1 else f"Reroll ({STAT_SHOP_REROLL_COST})"
             btn_reroll = c.button(
                 pygame.Rect((10, card_h - 40), (card_w - 20, 30)),
-                f"Reroll ({STAT_SHOP_REROLL_COST})",
+                reroll_label,
                 container=panel,
                 intent='secondary'
             )
@@ -510,6 +539,7 @@ class ShopMenus:
             level = player.passives[selected_key]
             category = skill.get('category', 'Kit')
             cost = game.skill_upgrade_cost(selected_key)
+            altar_upgrade = getattr(game, "active_altar", None) is not None and game.active_altar.kind == "skill_altar"
             
             c.label(
                 pygame.Rect((10, 10), (360, 20)),
@@ -531,11 +561,11 @@ class ShopMenus:
             
             self.skills_upgrade_btn = c.button(
                 pygame.Rect((10, 340), (360, 50)),
-                'Upar Skill',
+                'Upar via Altar' if altar_upgrade else 'Upgrade via Altar',
                 container=self.skills_detail_panel,
-                intent='primary'
+                intent='primary' if altar_upgrade else 'muted'
             )
-            if level >= 10 or inv.points < cost:
+            if not altar_upgrade or level >= 10 or inv.points < cost:
                 self.skills_upgrade_btn.disable()
         else:
             self.skills_upgrade_btn = None
@@ -546,7 +576,6 @@ class ShopMenus:
             container=self.skills_window,
             intent='muted'
         )
-
     def render_constructions(self, game, selected, mouse_pos):
         self.render_game(game, mouse_pos, flip=False, draw_gui=False)
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -555,16 +584,21 @@ class ShopMenus:
 
         if pygame_gui is None or not getattr(self, "components", None) or not self.components.available:
             return self._render_constructions_legacy(game, selected, mouse_pos)
-            
+
         c = self.components
         entries = self.construction_catalog()
         selected = max(0, min(selected, len(entries) - 1))
-        
-        signature = selected
+
+        inv = game.get_inventory(game.menu_player_index)
+        relic_count = sum(1 for it in inv.items.values() if it.is_relic)
+        selected_entry = entries[selected]
+        is_relic_entry = selected_entry["tier"] == 3
+
+        signature = (selected, relic_count, inv.points)
         if not hasattr(self, 'constructions_window') or not self.constructions_window or not self.constructions_window.alive() or getattr(self, '_last_const_signature', None) != signature:
             if hasattr(self, 'constructions_window') and self.constructions_window:
                 self.constructions_window.kill()
-                
+
             self.constructions_window = c.window(
                 "CONSTRUCOES",
                 (940, 600),
@@ -572,14 +606,14 @@ class ShopMenus:
                 y=58,
                 close_button=False
             )
-            
+
             c.label(pygame.Rect((20, 12), (880, 26)), "Arvore de itens, fusoes e reliquias", container=self.constructions_window)
-            
+
             scroll_panel = c.scroll(pygame.Rect((20, 52), (390, 448)), container=self.constructions_window)
             detail_panel = c.panel(pygame.Rect((430, 52), (490, 448)), container=self.constructions_window)
-            
+
             self.const_action_buttons = {}
-            
+
             # Preenche a lista da esquerda
             inner_y = 10
             index = 0
@@ -601,24 +635,47 @@ class ShopMenus:
                     inner_y += 38
                     index += 1
                 inner_y += 10
-            
+
             scroll_panel.set_scrollable_area_dimensions((360, inner_y))
             self._scroll_container_to_item(scroll_panel, selected_item_top, 32, 448, inner_y)
-            
+
             # Preenche os detalhes da direita via surface customizada
             selected_item = entries[selected]["item"]
             detail_surf = pygame.Surface((490, 448), pygame.SRCALPHA)
             old_screen = self.screen
             self.screen = detail_surf
-            
+
             # Desenha fundo para clarear
             pygame.draw.rect(self.screen, (13, 22, 36, 150), detail_surf.get_rect(), border_radius=6)
             self._draw_construction_detail(game, selected_item, pygame.Rect(0, 0, 490, 448))
-            
+
             self.screen = old_screen
-            
+
             c.image(pygame.Rect((0, 0), (490, 448)), detail_surf, container=detail_panel)
-            
+
+            # Botao de forja para reliquias (Tier 3)
+            if is_relic_entry:
+                relic_source_key = selected_entry["key"].replace("relic:", "")
+                forge_unlocked = relic_count >= 3
+                has_points = inv.points >= 50
+                if forge_unlocked and has_points:
+                    forge_label = "Forjar Reliquia (50 pts)"
+                    forge_intent = "primary"
+                elif forge_unlocked:
+                    forge_label = "Pontos insuficientes (50 pts)"
+                    forge_intent = "muted"
+                else:
+                    forge_label = f"Bloqueado: Requer 3 Reliquias ({relic_count}/3)"
+                    forge_intent = "muted"
+                btn_forge = c.button(
+                    pygame.Rect((130, 518), (340, 40)),
+                    forge_label,
+                    container=self.constructions_window,
+                    intent=forge_intent
+                )
+                if forge_unlocked and has_points:
+                    self.const_action_buttons[btn_forge] = f"constructions_buy_relic:{relic_source_key}"
+
             btn_back = c.button(
                 pygame.Rect((370, 518), (200, 40)),
                 "Voltar ao Jogo",
@@ -626,11 +683,12 @@ class ShopMenus:
                 intent="muted"
             )
             self.const_action_buttons[btn_back] = "constructions_back"
-            
+
             self._last_const_signature = signature
 
         self.draw_gui_layer()
         return []
+
 
 
     def _skill_category_color(self, category):
@@ -726,7 +784,32 @@ class ShopMenus:
             y += 4
 
         self._draw_construction_detail(game, selected_item, detail_rect)
-        buttons.append(self._button(panel.centerx - 110, panel.bottom - 52, 220, 38, "Voltar", "constructions_back", mouse_pos, COLORS["muted_2"]))
+
+        # Botao de forja para reliquias (Tier 3)
+        if selected_entry["tier"] == 3:
+            relic_source_key = selected_entry["key"].replace("relic:", "")
+            inv = game.get_inventory(game.menu_player_index)
+            relic_count = sum(1 for it in inv.items.values() if it.is_relic)
+            forge_unlocked = relic_count >= 3
+            has_points = inv.points >= 50
+            if forge_unlocked and has_points:
+                forge_label = "Forjar Reliquia (50 pts)"
+                forge_action = f"constructions_buy_relic:{relic_source_key}"
+                forge_color = COLORS["xp"]
+            elif forge_unlocked:
+                forge_label = "Pontos insuficientes (50 pts)"
+                forge_action = None
+                forge_color = COLORS["muted_2"]
+            else:
+                forge_label = f"Bloqueado: Requer 3 Reliquias ({relic_count}/3)"
+                forge_action = None
+                forge_color = COLORS["muted_2"]
+            forge_btn_rect = pygame.Rect(panel.centerx - 240, panel.bottom - 52, 260, 38)
+            forge_btn = self._button(forge_btn_rect.x, forge_btn_rect.y, forge_btn_rect.w, forge_btn_rect.h, forge_label, forge_action or "noop", mouse_pos, forge_color)
+            if forge_action:
+                buttons.append(forge_btn)
+
+        buttons.append(self._button(panel.centerx + 30, panel.bottom - 52, 220, 38, "Voltar", "constructions_back", mouse_pos, COLORS["muted_2"]))
         # pygame.display.flip()
         return buttons
 

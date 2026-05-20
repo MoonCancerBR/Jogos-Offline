@@ -229,27 +229,49 @@ class InventoryMenu:
         overlay.fill((5, 10, 18, 176))
         self.screen.blit(overlay, (0, 0))
 
-        panel_h = 300 if quantity_enabled else 240
+        is_altar = game.active_altar is not None
+        if is_altar:
+            panel_h = 360 if quantity_enabled else 300
+            title = "DETALHES DO RNG DO ALTAR"
+            border_color = (245, 158, 11)  # Amber
+        else:
+            panel_h = 300 if quantity_enabled else 240
+            title = "CONFIRMAR COMPRA"
+            border_color = hex_color(COLORS["xp"])
+
         panel = pygame.Rect(SCREEN_WIDTH // 2 - 250, SCREEN_HEIGHT // 2 - panel_h // 2, 500, panel_h)
         pygame.draw.rect(self.screen, (9, 15, 26), panel, border_radius=8)
-        pygame.draw.rect(self.screen, hex_color(COLORS["xp"]), panel, width=2, border_radius=8)
+        pygame.draw.rect(self.screen, border_color, panel, width=2, border_radius=8)
 
-        self._center_text("CONFIRMAR COMPRA", self.font_title, panel.y + 24, COLORS["text"])
+        self._center_text(title, self.font_title, panel.y + 24, border_color if is_altar else COLORS["text"])
 
-        y = panel.y + 80
-        for line in self._wrap_text(message, 44)[:3]:
-            self._center_text(line, self.font, y, COLORS["muted"])
-            y += 24
+        y = panel.y + 70
+        if is_altar:
+            lines = [
+                f"Gastar {total_cost} pts para aprimorar?",
+                "Super Sucesso (20%): +1 nv extra & 25% desc.",
+                "Sucesso (50%): Upgrade estavel de nv.",
+                "Parcial (15%): Upgrade c/ reembolso.",
+                "Falha Instavel (15%): Sem upgrade, explode Altar,"
+            ]
+            for line in lines:
+                self._center_text(line, self.font_small if "Sucesso" in line or "Falha" in line else self.font, y, COLORS["upgrade"] if "Super" in line or "Parcial" in line else (COLORS["muted"] if "Sucesso (" in line else COLORS["danger"]))
+                y += 20
+        else:
+            for line in self._wrap_text(message, 44)[:3]:
+                self._center_text(line, self.font, y, COLORS["muted"])
+                y += 24
 
         buttons = []
         if quantity_enabled:
             q_text = f"Quantidade: {quantity}/{max_quantity}    Total: {total_cost} pts"
-            self._center_text(q_text, self.font, panel.y + 160, COLORS["text"])
-            buttons.append(self._button(panel.centerx - 120, panel.y + 190, 64, 34, "-", "point_confirm_decrease", mouse_pos, COLORS["muted_2"]))
-            self._center_text(f"x{quantity}", self.font, panel.y + 195, COLORS["text"])
-            buttons.append(self._button(panel.centerx + 56, panel.y + 190, 64, 34, "+", "point_confirm_increase", mouse_pos, COLORS["muted_2"]))
+            self._center_text(q_text, self.font, panel.bottom - 110 if is_altar else panel.y + 160, COLORS["text"])
+            btn_y = panel.bottom - 80 if is_altar else panel.y + 190
+            buttons.append(self._button(panel.centerx - 120, btn_y, 64, 34, "-", "point_confirm_decrease", mouse_pos, COLORS["muted_2"]))
+            self._center_text(f"x{quantity}", self.font, btn_y + 5, COLORS["text"])
+            buttons.append(self._button(panel.centerx + 56, btn_y, 64, 34, "+", "point_confirm_increase", mouse_pos, COLORS["muted_2"]))
 
-        actions_y = panel.bottom - 60
+        actions_y = panel.bottom - 46 if is_altar and quantity_enabled else panel.bottom - 60
         actions = [(f"Confirmar ({total_cost} pts)", "point_confirm_yes", COLORS["xp"]), ("Cancelar", "point_confirm_no", COLORS["muted_2"])]
         for index, (label, action, color) in enumerate(actions):
             button_color = COLORS["upgrade"] if index == selected else color
@@ -269,7 +291,7 @@ class InventoryMenu:
             pygame.draw.circle(self.screen, hex_color(COLORS["upgrade"]), rect.center, rect.width // 3)
         else:
             if item.key in self.item_icons:
-                icon = pygame.transform.scale(self.item_icons[item.key], (rect.width - 8, rect.height - 8))
+                icon = self.get_item_icon(item.key, (rect.width - 8, rect.height - 8))
                 self.screen.blit(icon, (rect.x + 4, rect.y + 4))
             else:
                 pygame.draw.circle(self.screen, hex_color(COLORS["special"]), rect.center, rect.width // 3)

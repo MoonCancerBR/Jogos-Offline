@@ -5,11 +5,27 @@ if __package__:
     from ...data.constants import *
     from ..entities import Drop
     from ...data.items import item_display_name, RELIC_DEFINITIONS
+    from ...data.stamps import (
+        ALL_DROPPABLE_STAMP_KEYS,
+        FUNCTIONAL_STAMP_KEYS,
+        MAX_STAMP_LEVEL,
+        Stamp,
+        stamp_display_name,
+        stamp_sell_value,
+    )
     from .buff_applicator import recalc_item_buffs, ensure_item_bonus_fields
 else:
     from Sobrevivencia.data.constants import *
     from Sobrevivencia.core.entities import Drop
     from Sobrevivencia.data.items import item_display_name, RELIC_DEFINITIONS
+    from Sobrevivencia.data.stamps import (
+        ALL_DROPPABLE_STAMP_KEYS,
+        FUNCTIONAL_STAMP_KEYS,
+        MAX_STAMP_LEVEL,
+        Stamp,
+        stamp_display_name,
+        stamp_sell_value,
+    )
     from Sobrevivencia.core.managers.buff_applicator import recalc_item_buffs, ensure_item_bonus_fields
 
 class ItemManager:
@@ -69,6 +85,8 @@ class ItemManager:
         )
 
     def _update_drops(self, dt):
+        if getattr(self, "magnet_timer", 0.0) > 0.0:
+            self.magnet_timer -= dt
         alive = []
         for drop in self.drops:
             drop.ttl -= dt
@@ -85,7 +103,9 @@ class ItemManager:
             distance = to_player.length()
 
             magnet_radius = self.drop_magnet_radius(drop.kind)
-            if 0 < distance < magnet_radius:
+            if getattr(self, "magnet_timer", 0.0) > 0.0 and distance > 0:
+                drop.pos += to_player.normalize() * (1200.0 * dt)
+            elif 0 < distance < magnet_radius:
                 drop.pos += to_player.normalize() * DROP_ATTRACT_SPEED * dt
 
             if distance <= DROP_PICKUP_RADIUS + drop.radius:
@@ -193,6 +213,26 @@ class ItemManager:
             self.message = "Escudo ativo: invulneravel, rapido e repelente."
         elif drop.kind == "item_box":
             self.grant_random_item(player.player_index)
+        elif drop.kind == "stamp":
+            self.grant_stamp(str(drop.value), player.player_index)
+        elif drop.kind == "vacuum":
+            self.magnet_timer = 4.0
+            self.add_floater(player.pos, "IMA GLOBAL!", "#06B6D4")
+            self.message = "Ima Global ativado! Coletando tudo."
+        elif drop.kind == "portal":
+            self.current_dimension = "pocket"
+            self.pocket_dimension_timer = 30.0
+            self.message = "Dimensao de Bolso! Sobreviva ao HP Decay!"
+            for p in self.alive_players():
+                p.original_pos = Vector2(p.pos)
+                p.pos = Vector2(20000.0, 20000.0) + self.random_offset(100.0)
+                if p.body:
+                    p.body.position = p.pos.x, p.pos.y
+            
+            # Spawn void elite guards
+            if hasattr(self, "_spawn_special_enemy"):
+                self._spawn_special_enemy("chromatic", 1.5)
+                self._spawn_special_enemy("chromatic", 1.5)
         return True
 
     def grant_random_item(self, player_index=0):
@@ -220,11 +260,14 @@ class ItemManager:
         name = item_display_name(item)
         if result == "new":
             self.message = f"Novo item: {name}."
+            self.add_alert(player.pos, f"ITEM: {name}", "#38BDF8")
         elif result == "level_up":
             self.message = f"{name} subiu para o nivel {item.level}."
+            self.add_alert(player.pos, f"UP: {name} Nv{item.level}", "#A78BFA")
         else:
             inv.points += 1
             self.message = f"{name} ja esta no maximo. +1 ponto de item."
+            self.add_alert(player.pos, f"MAX: +1 ponto", "#64748B")
 
         # Sempre recalcula buffs após mudança no inventário
         ensure_item_bonus_fields(player)
@@ -265,6 +308,8 @@ class ItemManager:
             self.message = "Recompensa: pontos e carga de itens."
 
     def _grant_miniboss_reward(self, pos, killer_index=0):
+        self.miniboss_arena_center = None
+        self.miniboss_trapped_player = None
         killer = self.get_player(killer_index)
         inv = self.get_inventory(killer_index)
         killer.health = killer.max_health
@@ -272,10 +317,11 @@ class ItemManager:
         killer.score += 5200 + int(self.time_alive * 35)
         inv.points += 3
         self._grant_bonus_levels(3, killer_index)
+        self.spawn_drop("portal", Vector2(pos), 1)
         for _ in range(14):
             self.spawn_drop("coin", Vector2(pos) + self.random_offset(88), 1)
         self._grant_random_reward(pos, strong=True, player_index=killer_index)
-        self.message = "Mini-boss derrotado: vida cheia, +3 niveis e recompensa."
+        self.message = "Mini-boss derrotado: Altar de Portal Ativo!"
 
     def _grant_bonus_levels(self, amount, player_index=0):
         if self.multiplayer:
@@ -372,17 +418,40 @@ class ItemManager:
         offer = self.stat_shop_offers[index]
         cost = offer.get("cost", 0)
         inv = self.get_inventory(0)
-        if inv.points < cost:
-            self.message = f"Pontos insuficientes para comprar esta melhoria (custa {cost})."
-            return False
-        inv.points -= cost
-        # Shared: apply to all players
-        for effect in offer["effects"]:
-            for player in self.players:
-                self._apply_stat_shop_effect(effect["key"], effect["value"], player)
-        self.stat_shop_offers = []
-        self.message = f"Melhoria comprada: {offer['title']}."
-        return True
+        
+        is_night = getattr(self, "light_level", 1.0) < 0.15
+        
+        if is_night:
+            for p in self.alive_players():
+                hp_cost = int(p.max_health * 0.20)
+                if p.health <= hp_cost + 5:
+                    self.message = "Vida muito baixa para o Sacrificio Sangrento!"
+                    return False
+            
+            for p in self.alive_players():
+                hp_cost = int(p.max_health * 0.20)
+                p.health -= hp_cost
+                p.damage_bonus += 0.15
+                self.add_floater(p.pos, f"-{hp_cost} HP PACTO!", "#EF4444")
+                self.add_floater(p.pos + Vector2(0, -25), "+15% DANO NOTURNO!", "#F59E0B")
+            
+            for effect in offer["effects"]:
+                for player in self.players:
+                    self._apply_stat_shop_effect(effect["key"], effect["value"], player)
+            self.stat_shop_offers = []
+            self.message = f"Pacto Sangrento: {offer['title']} (+15% Dano!)."
+            return True
+        else:
+            if inv.points < cost:
+                self.message = f"Pontos insuficientes para comprar esta melhoria (custa {cost})."
+                return False
+            inv.points -= cost
+            for effect in offer["effects"]:
+                for player in self.players:
+                    self._apply_stat_shop_effect(effect["key"], effect["value"], player)
+            self.stat_shop_offers = []
+            self.message = f"Melhoria comprada: {offer['title']}."
+            return True
 
     def _generate_stat_offer(self, power=None):
         if power is None:
@@ -779,7 +848,153 @@ class ItemManager:
             radius = 12
         elif kind == "item_box":
             radius = 13
+        elif kind == "stamp":
+            radius = 10
         self.drops.append(Drop(pos=Vector2(pos), kind=kind, value=value, radius=radius))
+
+    def _stamp_entries(self, player):
+        entries = []
+        for weapon_key in ("weapon_1", "weapon_2"):
+            for index, stamp in enumerate(player.weapon_stamps.get(weapon_key, [])):
+                entries.append((weapon_key, index, stamp))
+        for index, stamp in enumerate(player.stamp_reserve):
+            entries.append(("reserve", index, stamp))
+        return entries
+
+    def grant_stamp(self, stamp_key=None, player_index=0):
+        player = self.get_player(player_index)
+        if stamp_key is None:
+            stamp_key = self.random.choice(ALL_DROPPABLE_STAMP_KEYS)
+        stamp = Stamp(key=stamp_key, level=1)
+        player.stamp_reserve.append(stamp)
+        name = stamp_display_name(stamp)
+        self.message = f"Novo selo coletado: {name}."
+        self.add_alert(player.pos, f"SELO: {name}", "#F59E0B")
+        return stamp
+
+    def equip_stamp(self, weapon_key, selected):
+        player = self.get_player(self.menu_player_index)
+        entries = self._stamp_entries(player)
+        if selected < 0 or selected >= len(entries):
+            self.message = "Selo nao encontrado."
+            return False
+        location, index, stamp = entries[selected]
+        if location != "reserve":
+            self.message = "Este selo ja esta equipado."
+            return False
+        if stamp.key not in FUNCTIONAL_STAMP_KEYS:
+            self.message = "Fragmentos nao podem ser equipados; use para fusao ou venda."
+            return False
+        equipped = player.weapon_stamps.setdefault(weapon_key, [])
+        if len(equipped) >= 3:
+            self.message = "Esta arma ja tem 3 selos equipados."
+            return False
+        equipped.append(player.stamp_reserve.pop(index))
+        weapon_name = "distancia" if weapon_key == "weapon_1" else "corpo a corpo"
+        self.message = f"{stamp_display_name(stamp)} equipado na arma de {weapon_name}."
+        return True
+
+    def unequip_stamp(self, selected):
+        player = self.get_player(self.menu_player_index)
+        entries = self._stamp_entries(player)
+        if selected < 0 or selected >= len(entries):
+            self.message = "Selo nao encontrado."
+            return False
+        location, index, stamp = entries[selected]
+        if location == "reserve":
+            self.message = "Este selo ja esta guardado."
+            return False
+        player.stamp_reserve.append(player.weapon_stamps[location].pop(index))
+        self.message = f"{stamp_display_name(stamp)} guardado na reserva."
+        return True
+
+    def sell_stamp(self, selected):
+        player = self.get_player(self.menu_player_index)
+        entries = self._stamp_entries(player)
+        if selected < 0 or selected >= len(entries):
+            self.message = "Selo nao encontrado."
+            return False
+        location, index, stamp = entries[selected]
+        if location != "reserve":
+            self.message = "Desequipe o selo antes de vende-lo."
+            return False
+        value = stamp_sell_value(stamp)
+        player.stamp_reserve.pop(index)
+        self.get_inventory(self.menu_player_index).points += value
+        self.message = f"{stamp_display_name(stamp)} vendido por {value} pontos."
+        return True
+
+    def setup_stamp_fusion(self, selected):
+        player = self.get_player(self.menu_player_index)
+        entries = self._stamp_entries(player)
+        if selected < 0 or selected >= len(entries):
+            self.stamp_fusion_target = None
+            self.stamp_fusion_materials = []
+            self.stamp_fusion_msg = "Selo alvo invalido."
+            return False
+        _, _, stamp = entries[selected]
+        self.stamp_fusion_target = selected
+        self.stamp_fusion_materials = []
+        self.stamp_fusion_msg = f"Escolha 3 selos da reserva para aprimorar {stamp_display_name(stamp)}."
+        return True
+
+    def toggle_stamp_fusion_material(self, reserve_index):
+        player = self.get_player(self.menu_player_index)
+        if reserve_index < 0 or reserve_index >= len(player.stamp_reserve):
+            return False
+        target = getattr(self, "stamp_fusion_target", None)
+        entries = self._stamp_entries(player)
+        if target is not None and 0 <= target < len(entries):
+            location, index, _ = entries[target]
+            if location == "reserve" and index == reserve_index:
+                self.stamp_fusion_msg = "O selo alvo nao pode ser sacrificado."
+                return False
+        materials = getattr(self, "stamp_fusion_materials", [])
+        if reserve_index in materials:
+            materials.remove(reserve_index)
+        elif len(materials) < 3:
+            materials.append(reserve_index)
+        else:
+            self.stamp_fusion_msg = "Limite de 3 selos para sacrificio."
+            return False
+        self.stamp_fusion_materials = materials
+        return True
+
+    def can_confirm_stamp_fusion(self):
+        player = self.get_player(self.menu_player_index)
+        entries = self._stamp_entries(player)
+        target = getattr(self, "stamp_fusion_target", None)
+        materials = list(getattr(self, "stamp_fusion_materials", []))
+        if target is None or target < 0 or target >= len(entries):
+            return False, "Escolha um selo alvo."
+        location, target_index, target_stamp = entries[target]
+        if target_stamp.level >= MAX_STAMP_LEVEL or target_stamp.is_junk:
+            return False, "Este selo nao pode subir mais de nivel."
+        if len(set(materials)) != 3:
+            return False, "Sacrifique exatamente 3 selos da reserva."
+        if any(idx < 0 or idx >= len(player.stamp_reserve) for idx in materials):
+            return False, "Material de fusao invalido."
+        if location == "reserve" and target_index in materials:
+            return False, "O selo alvo nao pode ser sacrificado."
+        return True, "Fusao pronta."
+
+    def confirm_stamp_fusion(self):
+        ok, message = self.can_confirm_stamp_fusion()
+        if not ok:
+            self.stamp_fusion_msg = message
+            self.message = message
+            return False
+        player = self.get_player(self.menu_player_index)
+        entries = self._stamp_entries(player)
+        _, _, target_stamp = entries[self.stamp_fusion_target]
+        target_stamp.level = min(MAX_STAMP_LEVEL, target_stamp.level + 1)
+        for reserve_index in sorted(self.stamp_fusion_materials, reverse=True):
+            player.stamp_reserve.pop(reserve_index)
+        self.stamp_fusion_materials = []
+        self.stamp_fusion_target = None
+        self.stamp_fusion_msg = ""
+        self.message = f"{stamp_display_name(target_stamp)} aprimorado."
+        return True
 
     def add_floater(self, pos, text, color):
         self.floaters.append(
@@ -817,6 +1032,8 @@ class ItemManager:
         magnet = self.item_level("magnet_orb")
         base = XP_MAGNET_RADIUS if kind == "xp" else XP_MAGNET_RADIUS * 0.72
         if kind == "item_box":
-            base = XP_MAGNET_RADIUS * 0.9
+            base = XP_MAGNET_RADIUS * 1.4  # Item boxes easier to pick up
+        elif kind == "stamp":
+            base = XP_MAGNET_RADIUS * 1.8  # Stamps have large magnet radius
         return base + magnet * 9
 
